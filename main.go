@@ -55,10 +55,10 @@ func main() {
 	authService := auth.NewService(userRepo, refreshTokenRepo, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
-	router := server.NewRouter(authHandler, jwtManager, cfg.FrontendOrigin, log)
+	router := server.NewRouter(authHandler, jwtManager, cfg.AllowedOrigins, log)
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
+		Addr:         "0.0.0.0:" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,

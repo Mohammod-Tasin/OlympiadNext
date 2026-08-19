@@ -12,13 +12,13 @@ import (
 	appmw "olympiadnext/internal/http/middleware"
 )
 
-func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, frontendOrigin string, log *slog.Logger) http.Handler {
+func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, allowedOrigins []string, log *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 	r.Use(appmw.Logging(log))
-	r.Use(appmw.CORS(frontendOrigin))
+	r.Use(appmw.CORS(allowedOrigins))
 
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Use(appmw.RateLimitByIP(30, 10))
