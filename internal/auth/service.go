@@ -158,6 +158,13 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 	if err != nil {
 		return nil, ErrSessionExpired
 	}
+	if stored.Revoked {
+		s.log.Warn("refresh token reuse detected", "user_id", stored.UserID, "token_id", stored.ID)
+		if err := s.refreshTokens.RevokeAllForUser(ctx, stored.UserID); err != nil {
+			s.log.Error("refresh token reuse: revoke all failed", "user_id", stored.UserID, "error", err)
+		}
+		return nil, ErrSessionExpired
+	}
 	if !stored.IsActive(time.Now()) {
 		return nil, ErrSessionExpired
 	}

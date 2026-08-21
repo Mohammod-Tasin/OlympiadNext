@@ -31,12 +31,12 @@ func (r *RefreshTokenRepository) Create(ctx context.Context, t *token.RefreshTok
 
 func (r *RefreshTokenRepository) FindByTokenHash(ctx context.Context, tokenHash string) (*token.RefreshToken, error) {
 	const q = `
-		SELECT id, user_id, token_hash, expires_at, created_at, revoked_at
+		SELECT id, user_id, token_hash, expires_at, created_at, revoked_at, revoked
 		FROM refresh_tokens WHERE token_hash = $1`
 
 	var t token.RefreshToken
 	err := r.db.QueryRowContext(ctx, q, tokenHash).
-		Scan(&t.ID, &t.UserID, &t.TokenHash, &t.ExpiresAt, &t.CreatedAt, &t.RevokedAt)
+		Scan(&t.ID, &t.UserID, &t.TokenHash, &t.ExpiresAt, &t.CreatedAt, &t.RevokedAt, &t.Revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, sql.ErrNoRows
 	}

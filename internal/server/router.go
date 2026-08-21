@@ -26,8 +26,9 @@ func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, allowe
 		r.Post("/register", authHandler.Register)
 		r.Post("/login", authHandler.Login)
 		r.Post("/google", authHandler.GoogleLogin)
-		r.Post("/refresh", authHandler.Refresh)
-		r.Post("/logout", authHandler.Logout)
+
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/refresh", authHandler.Refresh)
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/logout", authHandler.Logout)
 
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAccessToken(jwtManager))

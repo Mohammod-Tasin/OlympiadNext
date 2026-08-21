@@ -14,6 +14,7 @@ type RefreshToken struct {
 	ExpiresAt time.Time
 	CreatedAt time.Time
 	RevokedAt *time.Time
+	Revoked   bool
 }
 
 func (r *RefreshToken) IsActive(now time.Time) bool {
