@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -18,7 +19,7 @@ type Config struct {
 	CookieDomain     string
 	CookieSecure     bool
 	CookieSameSite   string
-	FrontendOrigin   string
+	AllowedOrigins   []string
 }
 
 // Load reads configuration from the environment and fails fast if a
@@ -39,7 +40,7 @@ func Load() (*Config, error) {
 		// deployments (e.g. Vercel + Fly.io on unrelated domains) must set
 		// this to "none", which additionally requires COOKIE_SECURE=true.
 		CookieSameSite: getEnv("COOKIE_SAME_SITE", "lax"),
-		FrontendOrigin: getEnv("FRONTEND_ORIGIN", "http://localhost:3000"),
+		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "http://localhost:3000")),
 	}
 
 	var err error
@@ -70,6 +71,20 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// parseOrigins splits a comma-separated ALLOWED_ORIGINS value (e.g.
+// "https://app.example.com,https://staging.example.com") into a clean
+// slice, trimming whitespace and dropping empty entries.
+func parseOrigins(raw string) []string {
+	parts := strings.Split(raw, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			origins = append(origins, p)
+		}
+	}
+	return origins
 }
 
 func parseDurationEnv(key string, fallback time.Duration) (time.Duration, error) {

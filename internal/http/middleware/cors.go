@@ -1,16 +1,20 @@
 package middleware
 
-import "net/http"
+import (
+	"net/http"
+	"slices"
+)
 
-// CORS allows exactly one configured origin to make credentialed
-// requests (needed so the browser sends/receives the HttpOnly refresh
-// cookie). "*" cannot be used together with credentials per the CORS
-// spec, so the origin must be an explicit allowlist of one.
-func CORS(allowedOrigin string) func(http.Handler) http.Handler {
+// CORS allows any of the configured origins (ALLOWED_ORIGINS) to make
+// credentialed requests (needed so the browser sends/receives the
+// HttpOnly refresh cookie). "*" cannot be used together with credentials
+// per the CORS spec, so each allowed origin — e.g. the production Vercel
+// domain plus any preview-deployment domains — must be listed explicitly.
+func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			if origin != "" && origin == allowedOrigin {
+			if origin != "" && slices.Contains(allowedOrigins, origin) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Vary", "Origin")
