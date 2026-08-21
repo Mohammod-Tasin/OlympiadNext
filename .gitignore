@@ -9,3 +9,11 @@ bin/
 web/node_modules/
 web/.next/
 web/out/
+
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+Desktop.ini
