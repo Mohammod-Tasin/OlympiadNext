@@ -24,6 +24,6 @@ func (r *RefreshToken) IsActive(now time.Time) bool {
 type Repository interface {
 	Create(ctx context.Context, t *RefreshToken) error
 	FindByTokenHash(ctx context.Context, tokenHash string) (*RefreshToken, error)
-	Revoke(ctx context.Context, id string) error
+	Revoke(ctx context.Context, id string) (bool, error)
 	RevokeAllForUser(ctx context.Context, userID string) error
 }

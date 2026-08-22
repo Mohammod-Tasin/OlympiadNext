@@ -174,8 +174,16 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 		return nil, ErrSessionExpired
 	}
 
-	if err := s.refreshTokens.Revoke(ctx, stored.ID); err != nil {
+	revoked, err := s.refreshTokens.Revoke(ctx, stored.ID)
+	if err != nil {
 		return nil, err
+	}
+	if !revoked {
+		s.log.Warn("refresh token reuse race detected", "user_id", stored.UserID, "token_id", stored.ID)
+		if err := s.refreshTokens.RevokeAllForUser(ctx, stored.UserID); err != nil {
+			s.log.Error("refresh token reuse race: revoke all failed", "user_id", stored.UserID, "error", err)
+		}
+		return nil, ErrSessionExpired
 	}
 
 	return s.issueTokenPair(ctx, u)
@@ -187,7 +195,8 @@ func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
 	if err != nil {
 		return nil // already gone; logout is idempotent
 	}
-	return s.refreshTokens.Revoke(ctx, stored.ID)
+	_, err = s.refreshTokens.Revoke(ctx, stored.ID)
+	return err
 }
 
 func (s *Service) issueTokenPair(ctx context.Context, u *user.User) (*TokenPair, error) {

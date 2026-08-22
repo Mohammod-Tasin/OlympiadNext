@@ -32,9 +32,9 @@ func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, allowe
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Use(appmw.RateLimitByIP(30, 10))
 
-		r.Post("/register", authHandler.Register)
-		r.Post("/login", authHandler.Login)
-		r.Post("/google", authHandler.GoogleLogin)
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/register", authHandler.Register)
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/login", authHandler.Login)
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/google", authHandler.GoogleLogin)
 
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/refresh", authHandler.Refresh)
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/logout", authHandler.Logout)
