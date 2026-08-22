@@ -20,6 +20,15 @@ func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, allowe
 	r.Use(appmw.Logging(log))
 	r.Use(appmw.CORS(allowedOrigins))
 
+	// Render's health checks hit GET/HEAD / on startup; without an
+	// explicit handler here they 404, which Render logs as noise on
+	// every deploy and periodic ping.
+	healthCheck := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}
+	r.Get("/", healthCheck)
+	r.Head("/", healthCheck)
+
 	r.Route("/api/auth", func(r chi.Router) {
 		r.Use(appmw.RateLimitByIP(30, 10))
 
