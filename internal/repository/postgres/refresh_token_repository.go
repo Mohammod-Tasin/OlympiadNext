@@ -46,12 +46,17 @@ func (r *RefreshTokenRepository) FindByTokenHash(ctx context.Context, tokenHash 
 	return &t, nil
 }
 
-func (r *RefreshTokenRepository) Revoke(ctx context.Context, id string) error {
+func (r *RefreshTokenRepository) Revoke(ctx context.Context, id string) (bool, error) {
 	const q = `UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL`
-	if _, err := r.db.ExecContext(ctx, q, id); err != nil {
-		return fmt.Errorf("refresh_token_repository: revoke failed: %w", err)
+	res, err := r.db.ExecContext(ctx, q, id)
+	if err != nil {
+		return false, fmt.Errorf("refresh_token_repository: revoke failed: %w", err)
 	}
-	return nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("refresh_token_repository: revoke rows affected failed: %w", err)
+	}
+	return n == 1, nil
 }
 
 func (r *RefreshTokenRepository) RevokeAllForUser(ctx context.Context, userID string) error {
