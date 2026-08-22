@@ -24,7 +24,7 @@ type AuthHandler struct {
 func NewAuthHandler(authService *auth.Service, cookieDomain string, cookieSecure bool, cookieSameSite string, log *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
-		cookies:     cookieConfig{Domain: cookieDomain, Secure: cookieSecure, SameSite: ParseSameSite(cookieSameSite)},
+		cookies:     newCookieConfig(cookieDomain, cookieSecure, cookieSameSite),
 		log:         log,
 	}
 }
