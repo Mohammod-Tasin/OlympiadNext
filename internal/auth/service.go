@@ -14,6 +14,7 @@ import (
 	"olympiadnext/internal/auth/google"
 	"olympiadnext/internal/auth/hash"
 	"olympiadnext/internal/auth/jwt"
+	"olympiadnext/internal/domain/device"
 	"olympiadnext/internal/domain/token"
 	"olympiadnext/internal/domain/user"
 )
@@ -36,6 +37,7 @@ type TokenPair struct {
 type Service struct {
 	users         user.Repository
 	refreshTokens token.Repository
+	devices       device.Repository
 	jwtManager    *jwt.Manager
 	googleVerify  *google.Verifier
 	log           *slog.Logger
@@ -44,6 +46,7 @@ type Service struct {
 func NewService(
 	users user.Repository,
 	refreshTokens token.Repository,
+	devices device.Repository,
 	jwtManager *jwt.Manager,
 	googleVerify *google.Verifier,
 	log *slog.Logger,
@@ -51,13 +54,14 @@ func NewService(
 	return &Service{
 		users:         users,
 		refreshTokens: refreshTokens,
+		devices:       devices,
 		jwtManager:    jwtManager,
 		googleVerify:  googleVerify,
 		log:           log,
 	}
 }
 
-func (s *Service) Register(ctx context.Context, rawEmail, password string) (*TokenPair, error) {
+func (s *Service) Register(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
 	if err := email.ValidateEmail(rawEmail); err != nil {
 		return nil, err
 	}
@@ -80,10 +84,10 @@ func (s *Service) Register(ctx context.Context, rawEmail, password string) (*Tok
 	}
 
 	s.log.Info("user registered", "user_id", u.ID, "provider", "local")
-	return s.issueTokenPair(ctx, u)
+	return s.issueTokenPair(ctx, u, deviceFingerprint)
 }
 
-func (s *Service) Login(ctx context.Context, rawEmail, password string) (*TokenPair, error) {
+func (s *Service) Login(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
 	u, err := s.users.FindByEmail(ctx, rawEmail)
 	if err != nil {
 		if errors.Is(err, user.ErrNotFound) {
@@ -100,13 +104,13 @@ func (s *Service) Login(ctx context.Context, rawEmail, password string) (*TokenP
 	}
 
 	s.log.Info("user logged in", "user_id", u.ID, "provider", "local")
-	return s.issueTokenPair(ctx, u)
+	return s.issueTokenPair(ctx, u, deviceFingerprint)
 }
 
 // GoogleLogin verifies the ID token with Google, then either logs into
 // an existing Google-linked account, links Google to an existing
 // email/password account, or creates a brand new account.
-func (s *Service) GoogleLogin(ctx context.Context, rawIDToken string) (*TokenPair, error) {
+func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint string) (*TokenPair, error) {
 	claims, err := s.googleVerify.Verify(ctx, rawIDToken)
 	if err != nil {
 		return nil, err
@@ -114,7 +118,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken string) (*TokenPai
 
 	if u, err := s.users.FindByGoogleID(ctx, claims.Subject); err == nil {
 		s.log.Info("user logged in", "user_id", u.ID, "provider", "google")
-		return s.issueTokenPair(ctx, u)
+		return s.issueTokenPair(ctx, u, deviceFingerprint)
 	} else if !errors.Is(err, user.ErrNotFound) {
 		return nil, err
 	}
@@ -127,7 +131,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken string) (*TokenPai
 		}
 		existing.GoogleID = &claims.Subject
 		s.log.Info("google account linked to existing user", "user_id", existing.ID)
-		return s.issueTokenPair(ctx, existing)
+		return s.issueTokenPair(ctx, existing, deviceFingerprint)
 
 	case errors.Is(err, user.ErrNotFound):
 		newUser := &user.User{
@@ -139,7 +143,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken string) (*TokenPai
 			return nil, err
 		}
 		s.log.Info("user registered", "user_id", newUser.ID, "provider", "google")
-		return s.issueTokenPair(ctx, newUser)
+		return s.issueTokenPair(ctx, newUser, deviceFingerprint)
 
 	default:
 		return nil, err
@@ -186,7 +190,7 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 		return nil, ErrSessionExpired
 	}
 
-	return s.issueTokenPair(ctx, u)
+	return s.issueTokenPair(ctx, u, "")
 }
 
 // Logout revokes a single session's refresh token.
@@ -199,7 +203,7 @@ func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
 	return err
 }
 
-func (s *Service) issueTokenPair(ctx context.Context, u *user.User) (*TokenPair, error) {
+func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFingerprint string) (*TokenPair, error) {
 	accessToken, err := s.jwtManager.GenerateAccessToken(u.ID, u.Email)
 	if err != nil {
 		return nil, err
@@ -218,10 +222,22 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User) (*TokenPair,
 		return nil, fmt.Errorf("auth: persist refresh token failed: %w", err)
 	}
 
+	if deviceFingerprint != "" {
+		go s.upsertDeviceAsync(u.ID, deviceFingerprint)
+	}
+
 	return &TokenPair{
 		AccessToken:           accessToken,
 		AccessTokenExpiresAt:  time.Now().Add(s.jwtManager.AccessTokenTTL()),
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	}, nil
+}
+
+func (s *Service) upsertDeviceAsync(userID, deviceFingerprint string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.devices.UpsertDevice(ctx, userID, deviceFingerprint); err != nil {
+		s.log.Error("device fingerprint upsert failed", "user_id", userID, "error", err)
+	}
 }
