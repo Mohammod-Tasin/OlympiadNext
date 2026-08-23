@@ -35,7 +35,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.Register(r.Context(), req.Email, req.Password)
+	pair, err := h.authService.Register(r.Context(), req.Email, req.Password, req.DeviceFingerprint)
 	if err != nil {
 		h.handleAuthError(w, err)
 		return
@@ -49,7 +49,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.Login(r.Context(), req.Email, req.Password)
+	pair, err := h.authService.Login(r.Context(), req.Email, req.Password, req.DeviceFingerprint)
 	if err != nil {
 		h.handleAuthError(w, err)
 		return
@@ -67,7 +67,7 @@ func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.GoogleLogin(r.Context(), req.IDToken)
+	pair, err := h.authService.GoogleLogin(r.Context(), req.IDToken, req.DeviceFingerprint)
 	if err != nil {
 		h.handleAuthError(w, err)
 		return
