@@ -8,11 +8,12 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"olympiadnext/internal/auth/jwt"
+	"olympiadnext/internal/domain/user"
 	"olympiadnext/internal/http/handler"
 	appmw "olympiadnext/internal/http/middleware"
 )
 
-func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, allowedOrigins []string, log *slog.Logger) http.Handler {
+func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, users user.Repository, allowedOrigins []string, log *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Recoverer)
@@ -40,7 +41,7 @@ func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, allowe
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/logout", authHandler.Logout)
 
 		r.Group(func(r chi.Router) {
-			r.Use(appmw.RequireAccessToken(jwtManager))
+			r.Use(appmw.RequireAccessToken(jwtManager, users))
 			r.Get("/me", authHandler.Me)
 		})
 	})

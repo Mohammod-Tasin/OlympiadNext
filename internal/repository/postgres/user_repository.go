@@ -41,21 +41,21 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, created_at, updated_at
+		SELECT id, email, password_hash, auth_provider, google_id, active_device_fingerprint, is_email_verified, is_phone_verified, created_at, updated_at
 		FROM users WHERE id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, id))
 }
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, created_at, updated_at
+		SELECT id, email, password_hash, auth_provider, google_id, active_device_fingerprint, is_email_verified, is_phone_verified, created_at, updated_at
 		FROM users WHERE LOWER(email) = LOWER($1)`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, email))
 }
 
 func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, created_at, updated_at
+		SELECT id, email, password_hash, auth_provider, google_id, active_device_fingerprint, is_email_verified, is_phone_verified, created_at, updated_at
 		FROM users WHERE google_id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, googleID))
 }
@@ -82,9 +82,31 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, userID, passwordHas
 	return checkRowsAffected(res)
 }
 
+func (r *UserRepository) UpdateActiveDeviceFingerprint(ctx context.Context, userID, deviceFingerprint string) error {
+	const q = `UPDATE users SET active_device_fingerprint = $1, updated_at = now() WHERE id = $2`
+	res, err := r.db.ExecContext(ctx, q, deviceFingerprint, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: update active device fingerprint failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+func (r *UserRepository) GetActiveDeviceFingerprint(ctx context.Context, userID string) (string, error) {
+	const q = `SELECT active_device_fingerprint FROM users WHERE id = $1`
+	var fingerprint sql.NullString
+	err := r.db.QueryRowContext(ctx, q, userID).Scan(&fingerprint)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", user.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("user_repository: get active device fingerprint failed: %w", err)
+	}
+	return fingerprint.String, nil
+}
+
 func (r *UserRepository) scanOne(row *sql.Row) (*user.User, error) {
 	var u user.User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.ActiveDeviceFingerprint, &u.IsEmailVerified, &u.IsPhoneVerified, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, user.ErrNotFound
 	}

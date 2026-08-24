@@ -223,6 +223,9 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 	}
 
 	if deviceFingerprint != "" {
+		if err := s.users.UpdateActiveDeviceFingerprint(ctx, u.ID, deviceFingerprint); err != nil {
+			return nil, fmt.Errorf("auth: set active device fingerprint failed: %w", err)
+		}
 		go s.upsertDeviceAsync(u.ID, deviceFingerprint)
 	}
 

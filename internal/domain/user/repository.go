@@ -11,4 +11,6 @@ type Repository interface {
 	FindByGoogleID(ctx context.Context, googleID string) (*User, error)
 	LinkGoogleID(ctx context.Context, userID, googleID string) error
 	UpdatePassword(ctx context.Context, userID, passwordHash string) error
+	UpdateActiveDeviceFingerprint(ctx context.Context, userID, deviceFingerprint string) error
+	GetActiveDeviceFingerprint(ctx context.Context, userID string) (string, error)
 }
