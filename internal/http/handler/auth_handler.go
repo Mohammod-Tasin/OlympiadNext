@@ -113,9 +113,19 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]string{
-		"user_id": claims.UserID,
-		"email":   claims.Email,
+
+	u, err := h.users.FindByID(r.Context(), claims.UserID)
+	if err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, dto.UserResponse{
+		UserID:          u.ID,
+		Email:           u.Email,
+		PhoneNumber:     u.PhoneNumber,
+		IsEmailVerified: u.IsEmailVerified,
+		IsPhoneVerified: u.IsPhoneVerified,
 	})
 }
 
