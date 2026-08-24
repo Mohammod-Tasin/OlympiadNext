@@ -5,9 +5,11 @@ package auth
 
 import (
 	"context"
+	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"time"
 
 	"olympiadnext/internal/auth/email"
@@ -15,6 +17,9 @@ import (
 	"olympiadnext/internal/auth/hash"
 	"olympiadnext/internal/auth/jwt"
 	"olympiadnext/internal/domain/device"
+	notifyemail "olympiadnext/internal/domain/email"
+	"olympiadnext/internal/domain/otp"
+	"olympiadnext/internal/domain/sms"
 	"olympiadnext/internal/domain/token"
 	"olympiadnext/internal/domain/user"
 )
@@ -23,7 +28,16 @@ var (
 	ErrInvalidCredentials = errors.New("auth: invalid email or password")
 	ErrGoogleOnlyAccount  = errors.New("auth: account uses Google sign-in, no password set")
 	ErrSessionExpired     = errors.New("auth: session expired or revoked")
+	ErrInvalidOTPTarget   = errors.New("auth: type must be 'email' or 'phone'")
+	ErrInvalidOTP         = errors.New("auth: invalid or expired code")
+	ErrPhoneNumberNotSet  = errors.New("auth: phone number not set")
 )
+
+// otpTTL is how long a generated OTP remains valid.
+const otpTTL = 5 * time.Minute
+
+// otpCodeDigits is the alphabet SendOTP draws from to build a 6-digit code.
+const otpCodeDigits = "0123456789"
 
 // TokenPair is what the HTTP layer sends back: the access token in the
 // body and the raw refresh token to be set as an HttpOnly cookie.
@@ -38,6 +52,9 @@ type Service struct {
 	users         user.Repository
 	refreshTokens token.Repository
 	devices       device.Repository
+	otps          otp.Repository
+	smsSender     sms.Sender
+	emailSender   notifyemail.Sender
 	jwtManager    *jwt.Manager
 	googleVerify  *google.Verifier
 	log           *slog.Logger
@@ -47,6 +64,9 @@ func NewService(
 	users user.Repository,
 	refreshTokens token.Repository,
 	devices device.Repository,
+	otps otp.Repository,
+	smsSender sms.Sender,
+	emailSender notifyemail.Sender,
 	jwtManager *jwt.Manager,
 	googleVerify *google.Verifier,
 	log *slog.Logger,
@@ -55,6 +75,9 @@ func NewService(
 		users:         users,
 		refreshTokens: refreshTokens,
 		devices:       devices,
+		otps:          otps,
+		smsSender:     smsSender,
+		emailSender:   emailSender,
 		jwtManager:    jwtManager,
 		googleVerify:  googleVerify,
 		log:           log,
@@ -235,6 +258,101 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	}, nil
+}
+
+// SendOTP generates a random 6-digit code for the given target and
+// persists it with a 5-minute expiration, then delivers it: a phone
+// target via smsSender (BulkSMSBD, or a console log in local dev), an
+// email target via emailSender (SMTP, or a console log in local dev).
+func (s *Service) SendOTP(ctx context.Context, userID string, targetType otp.TargetType) error {
+	if targetType != otp.TargetEmail && targetType != otp.TargetPhone {
+		return ErrInvalidOTPTarget
+	}
+
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if targetType == otp.TargetPhone && (u.PhoneNumber == nil || *u.PhoneNumber == "") {
+		return ErrPhoneNumberNotSet
+	}
+
+	code, err := generateOTPCode()
+	if err != nil {
+		return fmt.Errorf("auth: generate otp failed: %w", err)
+	}
+
+	if err := s.otps.Create(ctx, &otp.OTP{
+		UserID:     userID,
+		TargetType: targetType,
+		Code:       code,
+		ExpiresAt:  time.Now().Add(otpTTL),
+	}); err != nil {
+		return fmt.Errorf("auth: persist otp failed: %w", err)
+	}
+
+	switch targetType {
+	case otp.TargetPhone:
+		if err := s.smsSender.SendSMS(ctx, *u.PhoneNumber, "Your OlympiadNext OTP is "+code); err != nil {
+			return fmt.Errorf("auth: send otp sms failed: %w", err)
+		}
+	case otp.TargetEmail:
+		if err := s.emailSender.SendOTP(ctx, u.Email, code); err != nil {
+			return fmt.Errorf("auth: send otp email failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// VerifyOTP checks the given code against the latest unexpired OTP issued
+// for the target, consumes it on success, and marks the corresponding
+// verification flag on the user.
+func (s *Service) VerifyOTP(ctx context.Context, userID string, targetType otp.TargetType, code string) error {
+	if targetType != otp.TargetEmail && targetType != otp.TargetPhone {
+		return ErrInvalidOTPTarget
+	}
+
+	stored, err := s.otps.FindLatestValid(ctx, userID, targetType)
+	if err != nil {
+		if errors.Is(err, otp.ErrNotFound) {
+			return ErrInvalidOTP
+		}
+		return err
+	}
+
+	if stored.Code != code || !time.Now().Before(stored.ExpiresAt) {
+		return ErrInvalidOTP
+	}
+
+	if err := s.otps.Delete(ctx, stored.ID); err != nil {
+		return fmt.Errorf("auth: delete used otp failed: %w", err)
+	}
+
+	switch targetType {
+	case otp.TargetEmail:
+		err = s.users.MarkEmailVerified(ctx, userID)
+	case otp.TargetPhone:
+		err = s.users.MarkPhoneVerified(ctx, userID)
+	}
+	if err != nil {
+		return fmt.Errorf("auth: mark verified failed: %w", err)
+	}
+
+	s.log.Info("otp verified", "user_id", userID, "target_type", targetType)
+	return nil
+}
+
+func generateOTPCode() (string, error) {
+	code := make([]byte, 6)
+	for i := range code {
+		n, err := crand.Int(crand.Reader, big.NewInt(int64(len(otpCodeDigits))))
+		if err != nil {
+			return "", err
+		}
+		code[i] = otpCodeDigits[n.Int64()]
+	}
+	return string(code), nil
 }
 
 func (s *Service) upsertDeviceAsync(userID, deviceFingerprint string) {

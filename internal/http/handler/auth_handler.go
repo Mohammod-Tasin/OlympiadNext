@@ -5,10 +5,12 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"olympiadnext/internal/auth"
 	authemail "olympiadnext/internal/auth/email"
 	"olympiadnext/internal/auth/google"
+	"olympiadnext/internal/domain/otp"
 	"olympiadnext/internal/domain/user"
 	"olympiadnext/internal/http/dto"
 	"olympiadnext/internal/http/middleware"
@@ -17,13 +19,15 @@ import (
 
 type AuthHandler struct {
 	authService *auth.Service
+	users       user.Repository
 	cookies     cookieConfig
 	log         *slog.Logger
 }
 
-func NewAuthHandler(authService *auth.Service, cookieDomain string, cookieSecure bool, cookieSameSite string, log *slog.Logger) *AuthHandler {
+func NewAuthHandler(authService *auth.Service, users user.Repository, cookieDomain string, cookieSecure bool, cookieSameSite string, log *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
+		users:       users,
 		cookies:     newCookieConfig(cookieDomain, cookieSecure, cookieSameSite),
 		log:         log,
 	}
@@ -109,10 +113,114 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]string{
-		"user_id": claims.UserID,
-		"email":   claims.Email,
+
+	u, err := h.users.FindByID(r.Context(), claims.UserID)
+	if err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, dto.UserResponse{
+		UserID:          u.ID,
+		Email:           u.Email,
+		PhoneNumber:     u.PhoneNumber,
+		IsEmailVerified: u.IsEmailVerified,
+		IsPhoneVerified: u.IsPhoneVerified,
 	})
+}
+
+// SendOTP issues a 6-digit code for the authenticated caller to verify
+// their email or phone.
+func (h *AuthHandler) SendOTP(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	var req dto.SendOTPRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	targetType, ok := parseOTPTargetType(req.Type)
+	if !ok {
+		response.Error(w, http.StatusBadRequest, "type must be 'email' or 'phone'")
+		return
+	}
+
+	if err := h.authService.SendOTP(r.Context(), claims.UserID, targetType); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"message": "otp sent"})
+}
+
+// VerifyOTP checks a submitted code and, on success, marks the
+// corresponding email/phone verification flag on the caller's account.
+func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	var req dto.VerifyOTPRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	targetType, ok := parseOTPTargetType(req.Type)
+	if !ok {
+		response.Error(w, http.StatusBadRequest, "type must be 'email' or 'phone'")
+		return
+	}
+	if req.Code == "" {
+		response.Error(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	if err := h.authService.VerifyOTP(r.Context(), claims.UserID, targetType, req.Code); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"message": "verified"})
+}
+
+// UpdatePhoneNumber sets the caller's phone number, resetting phone
+// verification since the new number has never received an OTP.
+func (h *AuthHandler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	var req dto.UpdatePhoneNumberRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	phoneNumber := strings.TrimSpace(req.PhoneNumber)
+	if phoneNumber == "" {
+		response.Error(w, http.StatusBadRequest, "phone_number is required")
+		return
+	}
+
+	if err := h.users.UpdatePhoneNumber(r.Context(), claims.UserID, phoneNumber); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"message": "phone number updated"})
+}
+
+func parseOTPTargetType(raw string) (otp.TargetType, bool) {
+	switch otp.TargetType(raw) {
+	case otp.TargetEmail, otp.TargetPhone:
+		return otp.TargetType(raw), true
+	default:
+		return "", false
+	}
 }
 
 func (h *AuthHandler) respondWithSession(w http.ResponseWriter, pair *auth.TokenPair) {
@@ -128,12 +236,17 @@ func (h *AuthHandler) handleAuthError(w http.ResponseWriter, err error) {
 	case errors.Is(err, authemail.ErrInvalidEmail),
 		errors.Is(err, authemail.ErrWeakPassword):
 		response.Error(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, user.ErrEmailTaken):
+	case errors.Is(err, user.ErrEmailTaken),
+		errors.Is(err, user.ErrPhoneTaken):
 		response.Error(w, http.StatusConflict, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials),
 		errors.Is(err, auth.ErrGoogleOnlyAccount),
 		errors.Is(err, auth.ErrSessionExpired):
 		response.Error(w, http.StatusUnauthorized, err.Error())
+	case errors.Is(err, auth.ErrInvalidOTPTarget),
+		errors.Is(err, auth.ErrInvalidOTP),
+		errors.Is(err, auth.ErrPhoneNumberNotSet):
+		response.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, google.ErrInvalidToken):
 		response.Error(w, http.StatusUnauthorized, "invalid Google credential")
 	default:

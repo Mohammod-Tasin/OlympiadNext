@@ -8,18 +8,24 @@ import (
 )
 
 type Config struct {
-	Env              string
-	Port             string
-	DatabaseURL      string
-	JWTAccessSecret  string
-	JWTRefreshSecret string
-	AccessTokenTTL   time.Duration
-	RefreshTokenTTL  time.Duration
-	GoogleClientID   string
-	CookieDomain     string
-	CookieSecure     bool
-	CookieSameSite   string
-	AllowedOrigins   []string
+	Env               string
+	Port              string
+	DatabaseURL       string
+	JWTAccessSecret   string
+	JWTRefreshSecret  string
+	AccessTokenTTL    time.Duration
+	RefreshTokenTTL   time.Duration
+	GoogleClientID    string
+	CookieDomain      string
+	CookieSecure      bool
+	CookieSameSite    string
+	AllowedOrigins    []string
+	BulkSMSBDAPIKey   string
+	BulkSMSBDSenderID string
+	SMTPHost          string
+	SMTPPort          string
+	SMTPUsername      string
+	SMTPPassword      string
 }
 
 // Load reads configuration from the environment and fails fast if a
@@ -41,6 +47,18 @@ func Load() (*Config, error) {
 		// this to "none", which additionally requires COOKIE_SECURE=true.
 		CookieSameSite: getEnv("COOKIE_SAME_SITE", "lax"),
 		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "http://localhost:3000")),
+		// Optional: when unset, the SMS client falls back to logging OTPs to
+		// the console instead of calling out to BulkSMSBD, so local dev works
+		// without live SMS credentials.
+		BulkSMSBDAPIKey:   os.Getenv("BULKSMSBD_API_KEY"),
+		BulkSMSBDSenderID: os.Getenv("BULKSMSBD_SENDER_ID"),
+		// Optional: when SMTPUsername/SMTPPassword are unset, the email
+		// client falls back to logging OTPs to the console instead of
+		// calling out to Gmail, so local dev works without SMTP credentials.
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPUsername: os.Getenv("SMTP_USERNAME"),
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
 	}
 
 	var err error
