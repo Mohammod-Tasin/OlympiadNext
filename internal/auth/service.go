@@ -5,9 +5,11 @@ package auth
 
 import (
 	"context"
+	crand "crypto/rand"
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"time"
 
 	"olympiadnext/internal/auth/email"
@@ -15,6 +17,7 @@ import (
 	"olympiadnext/internal/auth/hash"
 	"olympiadnext/internal/auth/jwt"
 	"olympiadnext/internal/domain/device"
+	"olympiadnext/internal/domain/otp"
 	"olympiadnext/internal/domain/token"
 	"olympiadnext/internal/domain/user"
 )
@@ -23,7 +26,15 @@ var (
 	ErrInvalidCredentials = errors.New("auth: invalid email or password")
 	ErrGoogleOnlyAccount  = errors.New("auth: account uses Google sign-in, no password set")
 	ErrSessionExpired     = errors.New("auth: session expired or revoked")
+	ErrInvalidOTPTarget   = errors.New("auth: type must be 'email' or 'phone'")
+	ErrInvalidOTP         = errors.New("auth: invalid or expired code")
 )
+
+// otpTTL is how long a generated OTP remains valid.
+const otpTTL = 5 * time.Minute
+
+// otpCodeDigits is the alphabet SendOTP draws from to build a 6-digit code.
+const otpCodeDigits = "0123456789"
 
 // TokenPair is what the HTTP layer sends back: the access token in the
 // body and the raw refresh token to be set as an HttpOnly cookie.
@@ -38,6 +49,7 @@ type Service struct {
 	users         user.Repository
 	refreshTokens token.Repository
 	devices       device.Repository
+	otps          otp.Repository
 	jwtManager    *jwt.Manager
 	googleVerify  *google.Verifier
 	log           *slog.Logger
@@ -47,6 +59,7 @@ func NewService(
 	users user.Repository,
 	refreshTokens token.Repository,
 	devices device.Repository,
+	otps otp.Repository,
 	jwtManager *jwt.Manager,
 	googleVerify *google.Verifier,
 	log *slog.Logger,
@@ -55,6 +68,7 @@ func NewService(
 		users:         users,
 		refreshTokens: refreshTokens,
 		devices:       devices,
+		otps:          otps,
 		jwtManager:    jwtManager,
 		googleVerify:  googleVerify,
 		log:           log,
@@ -235,6 +249,83 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	}, nil
+}
+
+// SendOTP generates a random 6-digit code for the given target (email or
+// phone), persists it with a 5-minute expiration, and logs it to the
+// console — there is no SMS/email provider wired up yet, so this is the
+// delivery channel for now.
+func (s *Service) SendOTP(ctx context.Context, userID string, targetType otp.TargetType) error {
+	if targetType != otp.TargetEmail && targetType != otp.TargetPhone {
+		return ErrInvalidOTPTarget
+	}
+
+	code, err := generateOTPCode()
+	if err != nil {
+		return fmt.Errorf("auth: generate otp failed: %w", err)
+	}
+
+	if err := s.otps.Create(ctx, &otp.OTP{
+		UserID:     userID,
+		TargetType: targetType,
+		Code:       code,
+		ExpiresAt:  time.Now().Add(otpTTL),
+	}); err != nil {
+		return fmt.Errorf("auth: persist otp failed: %w", err)
+	}
+
+	s.log.Info(fmt.Sprintf("Generated OTP for user %s: %s", userID, code), "user_id", userID, "target_type", targetType)
+	return nil
+}
+
+// VerifyOTP checks the given code against the latest unexpired OTP issued
+// for the target, consumes it on success, and marks the corresponding
+// verification flag on the user.
+func (s *Service) VerifyOTP(ctx context.Context, userID string, targetType otp.TargetType, code string) error {
+	if targetType != otp.TargetEmail && targetType != otp.TargetPhone {
+		return ErrInvalidOTPTarget
+	}
+
+	stored, err := s.otps.FindLatestValid(ctx, userID, targetType)
+	if err != nil {
+		if errors.Is(err, otp.ErrNotFound) {
+			return ErrInvalidOTP
+		}
+		return err
+	}
+
+	if stored.Code != code || !time.Now().Before(stored.ExpiresAt) {
+		return ErrInvalidOTP
+	}
+
+	if err := s.otps.Delete(ctx, stored.ID); err != nil {
+		return fmt.Errorf("auth: delete used otp failed: %w", err)
+	}
+
+	switch targetType {
+	case otp.TargetEmail:
+		err = s.users.MarkEmailVerified(ctx, userID)
+	case otp.TargetPhone:
+		err = s.users.MarkPhoneVerified(ctx, userID)
+	}
+	if err != nil {
+		return fmt.Errorf("auth: mark verified failed: %w", err)
+	}
+
+	s.log.Info("otp verified", "user_id", userID, "target_type", targetType)
+	return nil
+}
+
+func generateOTPCode() (string, error) {
+	code := make([]byte, 6)
+	for i := range code {
+		n, err := crand.Int(crand.Reader, big.NewInt(int64(len(otpCodeDigits))))
+		if err != nil {
+			return "", err
+		}
+		code[i] = otpCodeDigits[n.Int64()]
+	}
+	return string(code), nil
 }
 
 func (s *Service) upsertDeviceAsync(userID, deviceFingerprint string) {

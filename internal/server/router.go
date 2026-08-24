@@ -43,6 +43,8 @@ func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, users 
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAccessToken(jwtManager, users))
 			r.Get("/me", authHandler.Me)
+			r.Post("/send-otp", authHandler.SendOTP)
+			r.Post("/verify-otp", authHandler.VerifyOTP)
 		})
 	})
 

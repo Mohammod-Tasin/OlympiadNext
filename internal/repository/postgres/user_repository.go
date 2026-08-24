@@ -104,6 +104,24 @@ func (r *UserRepository) GetActiveDeviceFingerprint(ctx context.Context, userID 
 	return fingerprint.String, nil
 }
 
+func (r *UserRepository) MarkEmailVerified(ctx context.Context, userID string) error {
+	const q = `UPDATE users SET is_email_verified = true, updated_at = now() WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, q, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: mark email verified failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+func (r *UserRepository) MarkPhoneVerified(ctx context.Context, userID string) error {
+	const q = `UPDATE users SET is_phone_verified = true, updated_at = now() WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, q, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: mark phone verified failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 func (r *UserRepository) scanOne(row *sql.Row) (*user.User, error) {
 	var u user.User
 	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.ActiveDeviceFingerprint, &u.IsEmailVerified, &u.IsPhoneVerified, &u.CreatedAt, &u.UpdatedAt)

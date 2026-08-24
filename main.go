@@ -50,10 +50,11 @@ func main() {
 	userRepo := postgres.NewUserRepository(conn)
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(conn)
 	deviceRepo := postgres.NewDeviceRepository(conn)
+	otpRepo := postgres.NewOTPRepository(conn)
 	jwtManager := jwt.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	googleVerifier := google.NewVerifier(cfg.GoogleClientID)
 
-	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, jwtManager, googleVerifier, log)
+	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, otpRepo, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
 	router := server.NewRouter(authHandler, jwtManager, userRepo, cfg.AllowedOrigins, log)
