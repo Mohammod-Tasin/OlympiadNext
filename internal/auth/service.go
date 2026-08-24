@@ -17,7 +17,9 @@ import (
 	"olympiadnext/internal/auth/hash"
 	"olympiadnext/internal/auth/jwt"
 	"olympiadnext/internal/domain/device"
+	notifyemail "olympiadnext/internal/domain/email"
 	"olympiadnext/internal/domain/otp"
+	"olympiadnext/internal/domain/sms"
 	"olympiadnext/internal/domain/token"
 	"olympiadnext/internal/domain/user"
 )
@@ -28,6 +30,7 @@ var (
 	ErrSessionExpired     = errors.New("auth: session expired or revoked")
 	ErrInvalidOTPTarget   = errors.New("auth: type must be 'email' or 'phone'")
 	ErrInvalidOTP         = errors.New("auth: invalid or expired code")
+	ErrPhoneNumberNotSet  = errors.New("auth: phone number not set")
 )
 
 // otpTTL is how long a generated OTP remains valid.
@@ -50,6 +53,8 @@ type Service struct {
 	refreshTokens token.Repository
 	devices       device.Repository
 	otps          otp.Repository
+	smsSender     sms.Sender
+	emailSender   notifyemail.Sender
 	jwtManager    *jwt.Manager
 	googleVerify  *google.Verifier
 	log           *slog.Logger
@@ -60,6 +65,8 @@ func NewService(
 	refreshTokens token.Repository,
 	devices device.Repository,
 	otps otp.Repository,
+	smsSender sms.Sender,
+	emailSender notifyemail.Sender,
 	jwtManager *jwt.Manager,
 	googleVerify *google.Verifier,
 	log *slog.Logger,
@@ -69,6 +76,8 @@ func NewService(
 		refreshTokens: refreshTokens,
 		devices:       devices,
 		otps:          otps,
+		smsSender:     smsSender,
+		emailSender:   emailSender,
 		jwtManager:    jwtManager,
 		googleVerify:  googleVerify,
 		log:           log,
@@ -251,13 +260,21 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 	}, nil
 }
 
-// SendOTP generates a random 6-digit code for the given target (email or
-// phone), persists it with a 5-minute expiration, and logs it to the
-// console — there is no SMS/email provider wired up yet, so this is the
-// delivery channel for now.
+// SendOTP generates a random 6-digit code for the given target and
+// persists it with a 5-minute expiration, then delivers it: a phone
+// target via smsSender (BulkSMSBD, or a console log in local dev), an
+// email target via emailSender (SMTP, or a console log in local dev).
 func (s *Service) SendOTP(ctx context.Context, userID string, targetType otp.TargetType) error {
 	if targetType != otp.TargetEmail && targetType != otp.TargetPhone {
 		return ErrInvalidOTPTarget
+	}
+
+	u, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if targetType == otp.TargetPhone && (u.PhoneNumber == nil || *u.PhoneNumber == "") {
+		return ErrPhoneNumberNotSet
 	}
 
 	code, err := generateOTPCode()
@@ -274,7 +291,17 @@ func (s *Service) SendOTP(ctx context.Context, userID string, targetType otp.Tar
 		return fmt.Errorf("auth: persist otp failed: %w", err)
 	}
 
-	s.log.Info(fmt.Sprintf("Generated OTP for user %s: %s", userID, code), "user_id", userID, "target_type", targetType)
+	switch targetType {
+	case otp.TargetPhone:
+		if err := s.smsSender.SendSMS(ctx, *u.PhoneNumber, "Your OlympiadNext OTP is "+code); err != nil {
+			return fmt.Errorf("auth: send otp sms failed: %w", err)
+		}
+	case otp.TargetEmail:
+		if err := s.emailSender.SendOTP(ctx, u.Email, code); err != nil {
+			return fmt.Errorf("auth: send otp email failed: %w", err)
+		}
+	}
+
 	return nil
 }
 

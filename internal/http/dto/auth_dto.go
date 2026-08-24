@@ -28,6 +28,10 @@ type VerifyOTPRequest struct {
 	Code string `json:"code"`
 }
 
+type UpdatePhoneNumberRequest struct {
+	PhoneNumber string `json:"phone_number"`
+}
+
 type AuthResponse struct {
 	AccessToken          string    `json:"access_token"`
 	AccessTokenExpiresAt time.Time `json:"access_token_expires_at"`

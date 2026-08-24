@@ -17,6 +17,7 @@ type User struct {
 	PasswordHash            *string
 	AuthProvider            AuthProvider
 	GoogleID                *string
+	PhoneNumber             *string
 	ActiveDeviceFingerprint *string
 	IsEmailVerified         bool
 	IsPhoneVerified         bool

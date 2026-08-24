@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"olympiadnext/internal/auth"
 	authemail "olympiadnext/internal/auth/email"
@@ -18,13 +19,15 @@ import (
 
 type AuthHandler struct {
 	authService *auth.Service
+	users       user.Repository
 	cookies     cookieConfig
 	log         *slog.Logger
 }
 
-func NewAuthHandler(authService *auth.Service, cookieDomain string, cookieSecure bool, cookieSameSite string, log *slog.Logger) *AuthHandler {
+func NewAuthHandler(authService *auth.Service, users user.Repository, cookieDomain string, cookieSecure bool, cookieSameSite string, log *slog.Logger) *AuthHandler {
 	return &AuthHandler{
 		authService: authService,
+		users:       users,
 		cookies:     newCookieConfig(cookieDomain, cookieSecure, cookieSameSite),
 		log:         log,
 	}
@@ -174,6 +177,33 @@ func (h *AuthHandler) VerifyOTP(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, map[string]string{"message": "verified"})
 }
 
+// UpdatePhoneNumber sets the caller's phone number, resetting phone
+// verification since the new number has never received an OTP.
+func (h *AuthHandler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	var req dto.UpdatePhoneNumberRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	phoneNumber := strings.TrimSpace(req.PhoneNumber)
+	if phoneNumber == "" {
+		response.Error(w, http.StatusBadRequest, "phone_number is required")
+		return
+	}
+
+	if err := h.users.UpdatePhoneNumber(r.Context(), claims.UserID, phoneNumber); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"message": "phone number updated"})
+}
+
 func parseOTPTargetType(raw string) (otp.TargetType, bool) {
 	switch otp.TargetType(raw) {
 	case otp.TargetEmail, otp.TargetPhone:
@@ -196,14 +226,16 @@ func (h *AuthHandler) handleAuthError(w http.ResponseWriter, err error) {
 	case errors.Is(err, authemail.ErrInvalidEmail),
 		errors.Is(err, authemail.ErrWeakPassword):
 		response.Error(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, user.ErrEmailTaken):
+	case errors.Is(err, user.ErrEmailTaken),
+		errors.Is(err, user.ErrPhoneTaken):
 		response.Error(w, http.StatusConflict, err.Error())
 	case errors.Is(err, auth.ErrInvalidCredentials),
 		errors.Is(err, auth.ErrGoogleOnlyAccount),
 		errors.Is(err, auth.ErrSessionExpired):
 		response.Error(w, http.StatusUnauthorized, err.Error())
 	case errors.Is(err, auth.ErrInvalidOTPTarget),
-		errors.Is(err, auth.ErrInvalidOTP):
+		errors.Is(err, auth.ErrInvalidOTP),
+		errors.Is(err, auth.ErrPhoneNumberNotSet):
 		response.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, google.ErrInvalidToken):
 		response.Error(w, http.StatusUnauthorized, "invalid Google credential")

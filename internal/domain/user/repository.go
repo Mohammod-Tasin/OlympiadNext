@@ -15,4 +15,5 @@ type Repository interface {
 	GetActiveDeviceFingerprint(ctx context.Context, userID string) (string, error)
 	MarkEmailVerified(ctx context.Context, userID string) error
 	MarkPhoneVerified(ctx context.Context, userID string) error
+	UpdatePhoneNumber(ctx context.Context, userID, phone string) error
 }
