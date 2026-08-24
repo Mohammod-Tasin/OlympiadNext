@@ -12,13 +12,16 @@ const (
 // User is the core domain entity. PasswordHash and GoogleID are pointers
 // because exactly one may be unset depending on how the account was created.
 type User struct {
-	ID           string
-	Email        string
-	PasswordHash *string
-	AuthProvider AuthProvider
-	GoogleID     *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                      string
+	Email                   string
+	PasswordHash            *string
+	AuthProvider            AuthProvider
+	GoogleID                *string
+	ActiveDeviceFingerprint *string
+	IsEmailVerified         bool
+	IsPhoneVerified         bool
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 }
 
 func (u *User) HasPassword() bool {
