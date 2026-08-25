@@ -71,6 +71,7 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	
 	go func() {
 		log.Info("server starting", "port", cfg.Port, "env", cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
