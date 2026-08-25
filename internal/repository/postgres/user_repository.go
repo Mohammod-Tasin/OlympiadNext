@@ -24,10 +24,10 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	const q = `
 		INSERT INTO users (id, email, password_hash, auth_provider, google_id, is_email_verified, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $3 = 'google', now(), now())
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now(), now())
 		RETURNING id, is_email_verified, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, u.Email, u.PasswordHash, u.AuthProvider, u.GoogleID).
+	err := r.db.QueryRowContext(ctx, q, u.Email, u.PasswordHash, u.AuthProvider, u.GoogleID, u.IsEmailVerified).
 		Scan(&u.ID, &u.IsEmailVerified, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		var pqErr *pq.Error
@@ -60,9 +60,9 @@ func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*
 	return r.scanOne(r.db.QueryRowContext(ctx, q, googleID))
 }
 
-func (r *UserRepository) LinkGoogleID(ctx context.Context, userID, googleID string) error {
-	const q = `UPDATE users SET google_id = $1, is_email_verified = true, updated_at = now() WHERE id = $2`
-	res, err := r.db.ExecContext(ctx, q, googleID, userID)
+func (r *UserRepository) LinkGoogleID(ctx context.Context, userID, googleID string, isEmailVerified bool) error {
+	const q = `UPDATE users SET google_id = $1, is_email_verified = $2, updated_at = now() WHERE id = $3`
+	res, err := r.db.ExecContext(ctx, q, googleID, isEmailVerified, userID)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation {
