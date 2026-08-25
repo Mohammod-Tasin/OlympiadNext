@@ -19,7 +19,7 @@ type OTP struct {
 	ID         string
 	UserID     string
 	TargetType TargetType
-	Code       string
+	Code       string // SHA-256 hex digest of the delivered code, never the plaintext
 	ExpiresAt  time.Time
 	CreatedAt  time.Time
 }
