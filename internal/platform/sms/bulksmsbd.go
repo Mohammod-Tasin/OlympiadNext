@@ -24,7 +24,7 @@ func NewBulkSMSBDClient(apiKey, senderID string, log *slog.Logger) *BulkSMSBDCli
 	return &BulkSMSBDClient{
 		apiKey:     apiKey,
 		senderID:   senderID,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{Timeout: 8 * time.Second},
 		log:        log,
 	}
 }

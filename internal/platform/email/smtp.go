@@ -8,9 +8,16 @@ import (
 	"log/slog"
 	"net/smtp"
 	"strings"
+	"time"
 )
 
 const otpEmailSubject = "Your OlympiadNext Verification Code"
+
+// smtpSendTimeout bounds how long a SendOTP call may block on the network.
+// net/smtp.SendMail has no timeout or context support of its own, so the
+// dial/send runs on a background goroutine and this deadline decides
+// whether the caller waits for it to finish.
+const smtpSendTimeout = 8 * time.Second
 
 type SMTPClient struct {
 	host     string
@@ -37,10 +44,23 @@ func (c *SMTPClient) SendOTP(ctx context.Context, toEmail, code string) error {
 	auth := smtp.PlainAuth("", c.username, c.password, c.host)
 	addr := c.host + ":" + c.port
 
-	if err := smtp.SendMail(addr, auth, c.username, []string{toEmail}, []byte(message)); err != nil {
-		return fmt.Errorf("smtp: send otp email failed: %w", err)
+	ctx, cancel := context.WithTimeout(ctx, smtpSendTimeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- smtp.SendMail(addr, auth, c.username, []string{toEmail}, []byte(message))
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("smtp: send otp email failed: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("smtp: dial timeout")
 	}
-	return nil
 }
 
 func buildMessage(from, to, subject, htmlBody string) string {
