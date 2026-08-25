@@ -8,7 +8,13 @@ import (
 	"log/slog"
 	"net/smtp"
 	"strings"
+	"time"
 )
+
+// sendTimeout bounds how long an outbound SMTP send may take. net/smtp has
+// no context support of its own, so without this a hung TCP dial or a slow
+// mail server can block the caller indefinitely (observed on Render).
+const sendTimeout = 8 * time.Second
 
 const otpEmailSubject = "Your OlympiadNext Verification Code"
 
@@ -37,10 +43,30 @@ func (c *SMTPClient) SendOTP(ctx context.Context, toEmail, code string) error {
 	auth := smtp.PlainAuth("", c.username, c.password, c.host)
 	addr := c.host + ":" + c.port
 
-	if err := smtp.SendMail(addr, auth, c.username, []string{toEmail}, []byte(message)); err != nil {
-		return fmt.Errorf("smtp: send otp email failed: %w", err)
+	return c.sendWithTimeout(ctx, addr, auth, toEmail, []byte(message))
+}
+
+// sendWithTimeout runs the blocking smtp.SendMail call on a goroutine and
+// races it against ctx and an 8s deadline, since smtp.SendMail itself
+// cannot be cancelled or given a deadline.
+func (c *SMTPClient) sendWithTimeout(ctx context.Context, addr string, auth smtp.Auth, toEmail string, message []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- smtp.SendMail(addr, auth, c.username, []string{toEmail}, message)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			return fmt.Errorf("smtp: send otp email failed: %w", err)
+		}
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("smtp dial timeout")
 	}
-	return nil
 }
 
 func buildMessage(from, to, subject, htmlBody string) string {
