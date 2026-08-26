@@ -218,8 +218,8 @@ func (h *AuthHandler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) 
 	response.JSON(w, http.StatusOK, map[string]string{"message": "phone number updated"})
 }
 
-// UpdateAcademicProfile sets the caller's institution, academic level,
-// and medium of instruction.
+// UpdateAcademicProfile sets the caller's full name, institution, academic
+// level, and medium of instruction.
 func (h *AuthHandler) UpdateAcademicProfile(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.AccessClaimsFromContext(r.Context())
 	if !ok {
@@ -232,15 +232,16 @@ func (h *AuthHandler) UpdateAcademicProfile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	fullName := strings.TrimSpace(req.FullName)
 	institution := strings.TrimSpace(req.InstitutionName)
 	level := strings.TrimSpace(req.Level)
 	medium := strings.TrimSpace(req.Medium)
-	if institution == "" || level == "" || medium == "" {
-		response.Error(w, http.StatusBadRequest, "institution_name, level, and medium are required")
+	if fullName == "" || institution == "" || level == "" || medium == "" {
+		response.Error(w, http.StatusBadRequest, "full_name, institution_name, level, and medium are required")
 		return
 	}
 
-	if err := h.users.UpdateAcademicProfile(r.Context(), claims.UserID, institution, level, medium); err != nil {
+	if err := h.users.UpdateAcademicProfile(r.Context(), claims.UserID, fullName, institution, level, medium); err != nil {
 		h.handleAuthError(w, err)
 		return
 	}

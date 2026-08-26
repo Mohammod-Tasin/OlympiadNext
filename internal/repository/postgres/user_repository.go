@@ -122,11 +122,11 @@ func (r *UserRepository) MarkPhoneVerified(ctx context.Context, userID string) e
 	return checkRowsAffected(res)
 }
 
-// UpdateAcademicProfile sets the caller's institution, academic level,
-// and medium of instruction.
-func (r *UserRepository) UpdateAcademicProfile(ctx context.Context, userID string, institution, level, medium string) error {
-	const q = `UPDATE users SET institution_name = $1, level = $2, medium = $3, updated_at = now() WHERE id = $4`
-	res, err := r.db.ExecContext(ctx, q, institution, level, medium, userID)
+// UpdateAcademicProfile sets the caller's full name, institution, academic
+// level, and medium of instruction.
+func (r *UserRepository) UpdateAcademicProfile(ctx context.Context, userID string, fullName, institution, level, medium string) error {
+	const q = `UPDATE users SET full_name = $1, institution_name = $2, level = $3, medium = $4, updated_at = now() WHERE id = $5`
+	res, err := r.db.ExecContext(ctx, q, fullName, institution, level, medium, userID)
 	if err != nil {
 		return fmt.Errorf("user_repository: update academic profile failed: %w", err)
 	}

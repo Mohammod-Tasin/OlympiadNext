@@ -37,6 +37,7 @@ type UpdatePhoneNumberRequest struct {
 }
 
 type UpdateAcademicProfileRequest struct {
+	FullName        string `json:"full_name"`
 	InstitutionName string `json:"institution_name"`
 	Level           string `json:"level"`
 	Medium          string `json:"medium"`
