@@ -16,5 +16,5 @@ type Repository interface {
 	MarkEmailVerified(ctx context.Context, userID string) error
 	MarkPhoneVerified(ctx context.Context, userID string) error
 	UpdatePhoneNumber(ctx context.Context, userID, phone string) error
-	UpdateAcademicProfile(ctx context.Context, userID string, institution, level, medium string) error
+	UpdateAcademicProfile(ctx context.Context, userID string, fullName, institution, level, medium string) error
 }
