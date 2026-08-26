@@ -23,11 +23,11 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	const q = `
-		INSERT INTO users (id, email, password_hash, auth_provider, google_id, is_email_verified, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now(), now())
+		INSERT INTO users (id, email, full_name, password_hash, auth_provider, google_id, is_email_verified, institution_name, level, medium, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
 		RETURNING id, is_email_verified, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, u.Email, u.PasswordHash, u.AuthProvider, u.GoogleID, u.IsEmailVerified).
+	err := r.db.QueryRowContext(ctx, q, u.Email, u.FullName, u.PasswordHash, u.AuthProvider, u.GoogleID, u.IsEmailVerified, u.InstitutionName, u.Level, u.Medium).
 		Scan(&u.ID, &u.IsEmailVerified, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		var pqErr *pq.Error
@@ -41,21 +41,21 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
+		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
 		FROM users WHERE id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, id))
 }
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
+		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
 		FROM users WHERE LOWER(email) = LOWER($1)`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, email))
 }
 
 func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
+		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
 		FROM users WHERE google_id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, googleID))
 }
@@ -151,7 +151,7 @@ func (r *UserRepository) UpdatePhoneNumber(ctx context.Context, userID, phone st
 
 func (r *UserRepository) scanOne(row *sql.Row) (*user.User, error) {
 	var u user.User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.PhoneNumber, &u.ActiveDeviceFingerprint, &u.IsEmailVerified, &u.IsPhoneVerified, &u.InstitutionName, &u.Level, &u.Medium, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.PhoneNumber, &u.ActiveDeviceFingerprint, &u.IsEmailVerified, &u.IsPhoneVerified, &u.InstitutionName, &u.Level, &u.Medium, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, user.ErrNotFound
 	}

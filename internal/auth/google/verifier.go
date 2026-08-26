@@ -18,6 +18,7 @@ type Claims struct {
 	Subject       string // Google's stable per-user "sub" claim
 	Email         string
 	EmailVerified bool
+	Name          string
 }
 
 type Verifier struct {
@@ -39,6 +40,7 @@ func (v *Verifier) Verify(ctx context.Context, rawIDToken string) (*Claims, erro
 	sub, _ := payload.Claims["sub"].(string)
 	emailClaim, _ := payload.Claims["email"].(string)
 	emailVerified, _ := payload.Claims["email_verified"].(bool)
+	name, _ := payload.Claims["name"].(string)
 
 	if sub == "" || emailClaim == "" {
 		return nil, ErrInvalidToken
@@ -48,5 +50,6 @@ func (v *Verifier) Verify(ctx context.Context, rawIDToken string) (*Claims, erro
 		Subject:       sub,
 		Email:         emailClaim,
 		EmailVerified: emailVerified,
+		Name:          name,
 	}, nil
 }

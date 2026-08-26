@@ -85,7 +85,7 @@ func NewService(
 	}
 }
 
-func (s *Service) Register(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
+func (s *Service) Register(ctx context.Context, rawEmail, password, fullName, institutionName, level, medium, deviceFingerprint string) (*TokenPair, error) {
 	if err := email.ValidateEmail(rawEmail); err != nil {
 		return nil, err
 	}
@@ -99,9 +99,13 @@ func (s *Service) Register(ctx context.Context, rawEmail, password, deviceFinger
 	}
 
 	u := &user.User{
-		Email:        rawEmail,
-		PasswordHash: &passwordHash,
-		AuthProvider: user.ProviderLocal,
+		Email:           rawEmail,
+		FullName:        &fullName,
+		PasswordHash:    &passwordHash,
+		AuthProvider:    user.ProviderLocal,
+		InstitutionName: &institutionName,
+		Level:           &level,
+		Medium:          &medium,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, err
@@ -161,6 +165,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 	case errors.Is(err, user.ErrNotFound):
 		newUser := &user.User{
 			Email:           claims.Email,
+			FullName:        &claims.Name,
 			AuthProvider:    user.ProviderGoogle,
 			GoogleID:        &claims.Subject,
 			IsEmailVerified: claims.EmailVerified,
