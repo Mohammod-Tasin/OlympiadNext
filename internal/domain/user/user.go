@@ -14,6 +14,7 @@ const (
 type User struct {
 	ID                      string
 	Email                   string
+	FullName                *string
 	PasswordHash            *string
 	AuthProvider            AuthProvider
 	GoogleID                *string

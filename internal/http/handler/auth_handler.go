@@ -39,7 +39,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.Register(r.Context(), req.Email, req.Password, req.DeviceFingerprint)
+	pair, err := h.authService.Register(r.Context(), req.Email, req.Password, req.FullName, req.InstitutionName, req.Level, req.Medium, req.DeviceFingerprint)
 	if err != nil {
 		h.handleAuthError(w, err)
 		return
@@ -123,6 +123,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, dto.UserResponse{
 		UserID:          u.ID,
 		Email:           u.Email,
+		FullName:        u.FullName,
 		PhoneNumber:     u.PhoneNumber,
 		IsEmailVerified: u.IsEmailVerified,
 		IsPhoneVerified: u.IsPhoneVerified,
