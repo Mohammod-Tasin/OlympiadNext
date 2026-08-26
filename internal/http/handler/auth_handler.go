@@ -126,6 +126,9 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		PhoneNumber:     u.PhoneNumber,
 		IsEmailVerified: u.IsEmailVerified,
 		IsPhoneVerified: u.IsPhoneVerified,
+		InstitutionName: u.InstitutionName,
+		Level:           u.Level,
+		Medium:          u.Medium,
 	})
 }
 
@@ -212,6 +215,35 @@ func (h *AuthHandler) UpdatePhoneNumber(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	response.JSON(w, http.StatusOK, map[string]string{"message": "phone number updated"})
+}
+
+// UpdateAcademicProfile sets the caller's institution, academic level,
+// and medium of instruction.
+func (h *AuthHandler) UpdateAcademicProfile(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	var req dto.UpdateAcademicProfileRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	institution := strings.TrimSpace(req.InstitutionName)
+	level := strings.TrimSpace(req.Level)
+	medium := strings.TrimSpace(req.Medium)
+	if institution == "" || level == "" || medium == "" {
+		response.Error(w, http.StatusBadRequest, "institution_name, level, and medium are required")
+		return
+	}
+
+	if err := h.users.UpdateAcademicProfile(r.Context(), claims.UserID, institution, level, medium); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"message": "profile updated"})
 }
 
 func parseOTPTargetType(raw string) (otp.TargetType, bool) {

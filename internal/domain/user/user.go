@@ -21,6 +21,9 @@ type User struct {
 	ActiveDeviceFingerprint *string
 	IsEmailVerified         bool
 	IsPhoneVerified         bool
+	InstitutionName         *string
+	Level                   *string
+	Medium                  *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 }
