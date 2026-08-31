@@ -13,7 +13,7 @@ import (
 	appmw "olympiadnext/internal/http/middleware"
 )
 
-func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, users user.Repository, allowedOrigins []string, log *slog.Logger) http.Handler {
+func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHandler, jwtManager *jwt.Manager, users user.Repository, allowedOrigins []string, log *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Recoverer)
@@ -46,6 +46,26 @@ func NewRouter(authHandler *handler.AuthHandler, jwtManager *jwt.Manager, users 
 			r.Post("/send-otp", authHandler.SendOTP)
 			r.Post("/verify-otp", authHandler.VerifyOTP)
 			r.Post("/update-phone", authHandler.UpdatePhoneNumber)
+		})
+	})
+
+	// Client surface: public, read-only content consumed by the client
+	// frontend. No authentication required.
+	r.Route("/api/client", func(r chi.Router) {
+		r.Use(appmw.RateLimitByIP(60, 20))
+		r.Get("/events", eventHandler.GetActiveEvent)
+	})
+
+	// Admin surface: every route requires a valid access token AND an
+	// admin role. Kept as a wholly separate tree from the client routes.
+	r.Route("/api/admin", func(r chi.Router) {
+		r.Use(appmw.RateLimitByIP(60, 20))
+		r.Use(appmw.RequireAccessToken(jwtManager, users))
+		r.Use(appmw.RequireAdmin(users))
+
+		r.Route("/events", func(r chi.Router) {
+			r.Post("/", eventHandler.Create)
+			r.Put("/{eventID}", eventHandler.Update)
 		})
 	})
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"olympiadnext/internal/app/events"
 	"olympiadnext/internal/auth"
 	"olympiadnext/internal/auth/google"
 	"olympiadnext/internal/auth/jwt"
@@ -53,6 +54,7 @@ func main() {
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(conn)
 	deviceRepo := postgres.NewDeviceRepository(conn)
 	otpRepo := postgres.NewOTPRepository(conn)
+	eventRepo := postgres.NewEventRepository(conn)
 	smsSender := sms.NewBulkSMSBDClient(cfg.BulkSMSBDAPIKey, cfg.BulkSMSBDSenderID, log)
 	emailSender := email.NewSMTPClient(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, log)
 	jwtManager := jwt.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
@@ -61,7 +63,10 @@ func main() {
 	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, otpRepo, smsSender, emailSender, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
-	router := server.NewRouter(authHandler, jwtManager, userRepo, cfg.AllowedOrigins, log)
+	eventService := events.NewService(eventRepo, log)
+	eventHandler := handler.NewEventHandler(eventService, log)
+
+	router := server.NewRouter(authHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, log)
 
 	srv := &http.Server{
 		Addr:         "0.0.0.0:" + cfg.Port,
@@ -71,7 +76,6 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	
 	go func() {
 		log.Info("server starting", "port", cfg.Port, "env", cfg.Env)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
