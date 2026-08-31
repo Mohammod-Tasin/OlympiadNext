@@ -82,11 +82,11 @@ func main() {
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + cfg.Port,
 		Handler: router,
-		// 120s read/write windows so a 100 MB event-image upload on a
+		// 5-minute read/write windows so a 100 MB event-image upload on a
 		// slow connection is not cut off mid-transfer.
-		ReadTimeout:  120 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  5 * time.Minute,
+		WriteTimeout: 5 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
