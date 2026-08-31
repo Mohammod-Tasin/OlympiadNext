@@ -80,11 +80,13 @@ func main() {
 	router := server.NewRouter(authHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
-		Addr:         "0.0.0.0:" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    "0.0.0.0:" + cfg.Port,
+		Handler: router,
+		// 5-minute read/write windows so a 100 MB event-image upload on a
+		// slow connection is not cut off mid-transfer.
+		ReadTimeout:  5 * time.Minute,
+		WriteTimeout: 5 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
