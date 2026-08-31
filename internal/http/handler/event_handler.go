@@ -18,8 +18,9 @@ import (
 	"olympiadnext/internal/platform/storage"
 )
 
-// maxUploadBytes caps the entire upload request body at 5 MB.
-const maxUploadBytes = 5 << 20
+// maxUploadBytes caps the entire upload request body at 100 MB, so
+// high-resolution event images are accepted.
+const maxUploadBytes = 100 << 20
 
 // allowedImageExts is the set of extensions the upload endpoint accepts.
 var allowedImageExts = map[string]bool{
@@ -93,7 +94,7 @@ func (h *EventHandler) Update(w http.ResponseWriter, r *http.Request) {
 func (h *EventHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
-		response.Error(w, http.StatusBadRequest, "invalid multipart form or file larger than 5MB")
+		response.Error(w, http.StatusBadRequest, "invalid multipart form or file larger than 100MB")
 		return
 	}
 	defer func() {
