@@ -46,6 +46,7 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 			r.Post("/send-otp", authHandler.SendOTP)
 			r.Post("/verify-otp", authHandler.VerifyOTP)
 			r.Post("/update-phone", authHandler.UpdatePhoneNumber)
+			r.Put("/profile", authHandler.UpdateAcademicProfile)
 		})
 	})
 

@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 	crand "crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -84,7 +85,7 @@ func NewService(
 	}
 }
 
-func (s *Service) Register(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
+func (s *Service) Register(ctx context.Context, rawEmail, password, fullName, institutionName, level, medium, deviceFingerprint string) (*TokenPair, error) {
 	if err := email.ValidateEmail(rawEmail); err != nil {
 		return nil, err
 	}
@@ -98,9 +99,13 @@ func (s *Service) Register(ctx context.Context, rawEmail, password, deviceFinger
 	}
 
 	u := &user.User{
-		Email:        rawEmail,
-		PasswordHash: &passwordHash,
-		AuthProvider: user.ProviderLocal,
+		Email:           rawEmail,
+		FullName:        &fullName,
+		PasswordHash:    &passwordHash,
+		AuthProvider:    user.ProviderLocal,
+		InstitutionName: &institutionName,
+		Level:           &level,
+		Medium:          &medium,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
 		return nil, err
@@ -149,18 +154,21 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 	existing, err := s.users.FindByEmail(ctx, claims.Email)
 	switch {
 	case err == nil:
-		if err := s.users.LinkGoogleID(ctx, existing.ID, claims.Subject); err != nil {
+		if err := s.users.LinkGoogleID(ctx, existing.ID, claims.Subject, claims.EmailVerified); err != nil {
 			return nil, err
 		}
 		existing.GoogleID = &claims.Subject
+		existing.IsEmailVerified = claims.EmailVerified
 		s.log.Info("google account linked to existing user", "user_id", existing.ID)
 		return s.issueTokenPair(ctx, existing, deviceFingerprint)
 
 	case errors.Is(err, user.ErrNotFound):
 		newUser := &user.User{
-			Email:        claims.Email,
-			AuthProvider: user.ProviderGoogle,
-			GoogleID:     &claims.Subject,
+			Email:           claims.Email,
+			FullName:        &claims.Name,
+			AuthProvider:    user.ProviderGoogle,
+			GoogleID:        &claims.Subject,
+			IsEmailVerified: claims.EmailVerified,
 		}
 		if err := s.users.Create(ctx, newUser); err != nil {
 			return nil, err
@@ -285,7 +293,7 @@ func (s *Service) SendOTP(ctx context.Context, userID string, targetType otp.Tar
 	if err := s.otps.Create(ctx, &otp.OTP{
 		UserID:     userID,
 		TargetType: targetType,
-		Code:       code,
+		Code:       hash.SHA256Hex(code),
 		ExpiresAt:  time.Now().Add(otpTTL),
 	}); err != nil {
 		return fmt.Errorf("auth: persist otp failed: %w", err)
@@ -321,7 +329,8 @@ func (s *Service) VerifyOTP(ctx context.Context, userID string, targetType otp.T
 		return err
 	}
 
-	if stored.Code != code || !time.Now().Before(stored.ExpiresAt) {
+	codeMatches := subtle.ConstantTimeCompare([]byte(stored.Code), []byte(hash.SHA256Hex(code))) == 1
+	if !codeMatches || !time.Now().Before(stored.ExpiresAt) {
 		return ErrInvalidOTP
 	}
 

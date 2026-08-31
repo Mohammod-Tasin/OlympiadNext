@@ -5,6 +5,10 @@ import "time"
 type RegisterRequest struct {
 	Email             string `json:"email"`
 	Password          string `json:"password"`
+	FullName          string `json:"full_name"`
+	InstitutionName   string `json:"institution_name"`
+	Level             string `json:"level"`
+	Medium            string `json:"medium"`
 	DeviceFingerprint string `json:"device_fingerprint,omitempty"`
 }
 
@@ -32,6 +36,13 @@ type UpdatePhoneNumberRequest struct {
 	PhoneNumber string `json:"phone_number"`
 }
 
+type UpdateAcademicProfileRequest struct {
+	FullName        string `json:"full_name"`
+	InstitutionName string `json:"institution_name"`
+	Level           string `json:"level"`
+	Medium          string `json:"medium"`
+}
+
 type AuthResponse struct {
 	AccessToken          string    `json:"access_token"`
 	AccessTokenExpiresAt time.Time `json:"access_token_expires_at"`
@@ -40,7 +51,11 @@ type AuthResponse struct {
 type UserResponse struct {
 	UserID          string  `json:"user_id"`
 	Email           string  `json:"email"`
+	FullName        *string `json:"full_name,omitempty"`
 	PhoneNumber     *string `json:"phone_number,omitempty"`
 	IsEmailVerified bool    `json:"is_email_verified"`
 	IsPhoneVerified bool    `json:"is_phone_verified"`
+	InstitutionName *string `json:"institution_name,omitempty"`
+	Level           *string `json:"level,omitempty"`
+	Medium          *string `json:"medium,omitempty"`
 }

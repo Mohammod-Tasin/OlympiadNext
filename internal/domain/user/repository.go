@@ -9,7 +9,7 @@ type Repository interface {
 	FindByID(ctx context.Context, id string) (*User, error)
 	FindByEmail(ctx context.Context, email string) (*User, error)
 	FindByGoogleID(ctx context.Context, googleID string) (*User, error)
-	LinkGoogleID(ctx context.Context, userID, googleID string) error
+	LinkGoogleID(ctx context.Context, userID, googleID string, isEmailVerified bool) error
 	UpdatePassword(ctx context.Context, userID, passwordHash string) error
 	UpdateActiveDeviceFingerprint(ctx context.Context, userID, deviceFingerprint string) error
 	GetActiveDeviceFingerprint(ctx context.Context, userID string) (string, error)
@@ -17,4 +17,5 @@ type Repository interface {
 	MarkEmailVerified(ctx context.Context, userID string) error
 	MarkPhoneVerified(ctx context.Context, userID string) error
 	UpdatePhoneNumber(ctx context.Context, userID, phone string) error
+	UpdateAcademicProfile(ctx context.Context, userID string, fullName, institution, level, medium string) error
 }

@@ -23,11 +23,11 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	const q = `
-		INSERT INTO users (id, email, password_hash, auth_provider, google_id, is_email_verified, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $3 = 'google', now(), now())
+		INSERT INTO users (id, email, full_name, password_hash, auth_provider, google_id, is_email_verified, institution_name, level, medium, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
 		RETURNING id, role, is_email_verified, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, u.Email, u.PasswordHash, u.AuthProvider, u.GoogleID).
+	err := r.db.QueryRowContext(ctx, q, u.Email, u.FullName, u.PasswordHash, u.AuthProvider, u.GoogleID, u.IsEmailVerified, u.InstitutionName, u.Level, u.Medium).
 		Scan(&u.ID, &u.Role, &u.IsEmailVerified, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		var pqErr *pq.Error
@@ -41,28 +41,28 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, role, is_email_verified, is_phone_verified, created_at, updated_at
+		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, role, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
 		FROM users WHERE id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, id))
 }
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, role, is_email_verified, is_phone_verified, created_at, updated_at
+		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, role, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
 		FROM users WHERE LOWER(email) = LOWER($1)`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, email))
 }
 
 func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*user.User, error) {
 	const q = `
-		SELECT id, email, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, role, is_email_verified, is_phone_verified, created_at, updated_at
+		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, role, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
 		FROM users WHERE google_id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, googleID))
 }
 
-func (r *UserRepository) LinkGoogleID(ctx context.Context, userID, googleID string) error {
-	const q = `UPDATE users SET google_id = $1, is_email_verified = true, updated_at = now() WHERE id = $2`
-	res, err := r.db.ExecContext(ctx, q, googleID, userID)
+func (r *UserRepository) LinkGoogleID(ctx context.Context, userID, googleID string, isEmailVerified bool) error {
+	const q = `UPDATE users SET google_id = $1, is_email_verified = $2, updated_at = now() WHERE id = $3`
+	res, err := r.db.ExecContext(ctx, q, googleID, isEmailVerified, userID)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation {
@@ -137,6 +137,17 @@ func (r *UserRepository) MarkPhoneVerified(ctx context.Context, userID string) e
 	return checkRowsAffected(res)
 }
 
+// UpdateAcademicProfile sets the caller's full name, institution, academic
+// level, and medium of instruction.
+func (r *UserRepository) UpdateAcademicProfile(ctx context.Context, userID string, fullName, institution, level, medium string) error {
+	const q = `UPDATE users SET full_name = $1, institution_name = $2, level = $3, medium = $4, updated_at = now() WHERE id = $5`
+	res, err := r.db.ExecContext(ctx, q, fullName, institution, level, medium, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: update academic profile failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // UpdatePhoneNumber sets the phone number and always resets verification:
 // a changed number has never had an OTP delivered to it, so any prior
 // verified status no longer applies.
@@ -155,7 +166,7 @@ func (r *UserRepository) UpdatePhoneNumber(ctx context.Context, userID, phone st
 
 func (r *UserRepository) scanOne(row *sql.Row) (*user.User, error) {
 	var u user.User
-	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.PhoneNumber, &u.ActiveDeviceFingerprint, &u.Role, &u.IsEmailVerified, &u.IsPhoneVerified, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.PhoneNumber, &u.ActiveDeviceFingerprint, &u.Role, &u.IsEmailVerified, &u.IsPhoneVerified, &u.InstitutionName, &u.Level, &u.Medium, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, user.ErrNotFound
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -34,6 +35,15 @@ type bulkSMSBDRequest struct {
 	SenderID string `json:"senderid"`
 	Number   string `json:"number"`
 	Message  string `json:"message"`
+}
+
+// bulkSMSBDResponse is BulkSMSBD's response shape. The gateway replies
+// with HTTP 200 even when the message was rejected (e.g. "1002 sender id
+// pending"), so the real success/failure signal is inside this body, not
+// the status code.
+type bulkSMSBDResponse struct {
+	SuccessMessage string `json:"success_message"`
+	ErrorMessage   string `json:"error_message"`
 }
 
 // SendSMS delivers message to number via BulkSMSBD. When no API key is
@@ -67,8 +77,21 @@ func (c *BulkSMSBDClient) SendSMS(ctx context.Context, number, message string) e
 	}
 	defer res.Body.Close()
 
+	responseBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		return fmt.Errorf("bulksmsbd: read response failed: %w", err)
+	}
+
 	if res.StatusCode >= 400 {
-		return fmt.Errorf("bulksmsbd: unexpected status %d", res.StatusCode)
+		return fmt.Errorf("bulksmsbd error: %s", responseBody)
+	}
+
+	var parsed bulkSMSBDResponse
+	if err := json.Unmarshal(responseBody, &parsed); err != nil {
+		return fmt.Errorf("bulksmsbd: parse response failed: %w (body: %s)", err, responseBody)
+	}
+	if parsed.ErrorMessage != "" || parsed.SuccessMessage == "" {
+		return fmt.Errorf("bulksmsbd error: %s", responseBody)
 	}
 	return nil
 }

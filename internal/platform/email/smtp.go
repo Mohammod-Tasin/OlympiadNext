@@ -4,20 +4,22 @@ package email
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/smtp"
 	"strings"
 	"time"
 )
 
-const otpEmailSubject = "Your OlympiadNext Verification Code"
+// dialTimeout bounds how long an outbound SMTP send may take, including
+// the TLS dial. net/smtp has no context support of its own, so without
+// this a hung TCP dial or a slow mail server can block the caller
+// indefinitely (observed on Render).
+const dialTimeout = 8 * time.Second
 
-// smtpSendTimeout bounds how long a SendOTP call may block on the network.
-// net/smtp.SendMail has no timeout or context support of its own, so the
-// dial/send runs on a background goroutine and this deadline decides
-// whether the caller waits for it to finish.
-const smtpSendTimeout = 8 * time.Second
+const otpEmailSubject = "Your OlympiadNext Verification Code"
 
 type SMTPClient struct {
 	host     string
@@ -41,26 +43,70 @@ func (c *SMTPClient) SendOTP(ctx context.Context, toEmail, code string) error {
 	}
 
 	message := buildMessage(c.username, toEmail, otpEmailSubject, otpEmailHTML(code))
-	auth := smtp.PlainAuth("", c.username, c.password, c.host)
-	addr := c.host + ":" + c.port
+	return c.sendWithTimeout(ctx, toEmail, []byte(message))
+}
 
-	ctx, cancel := context.WithTimeout(ctx, smtpSendTimeout)
+// sendWithTimeout runs send on a goroutine and races it against ctx and
+// an 8s deadline, since net/smtp has no way to cancel or bound itself.
+func (c *SMTPClient) sendWithTimeout(ctx context.Context, toEmail string, message []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 
-	done := make(chan error, 1)
-	go func() {
-		done <- smtp.SendMail(addr, auth, c.username, []string{toEmail}, []byte(message))
-	}()
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.send(toEmail, message) }()
 
 	select {
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("smtp: send otp email failed: %w", err)
-		}
-		return nil
+	case err := <-errCh:
+		return err
 	case <-ctx.Done():
-		return fmt.Errorf("smtp: dial timeout")
+		return fmt.Errorf("smtp dial timeout")
 	}
+}
+
+// send connects over implicit TLS (port 465) and speaks SMTP manually.
+// Render blocks outbound port 587, so smtp.SendMail's plaintext-connect-
+// then-STARTTLS-upgrade never completes; dialing 465 with TLS from the
+// start avoids that blocked path entirely.
+func (c *SMTPClient) send(toEmail string, message []byte) error {
+	addr := net.JoinHostPort(c.host, c.port)
+
+	dialer := &net.Dialer{Timeout: dialTimeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{ServerName: c.host})
+	if err != nil {
+		return fmt.Errorf("smtp: tls dial failed: %w", err)
+	}
+
+	client, err := smtp.NewClient(conn, c.host)
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("smtp: client init failed: %w", err)
+	}
+	defer client.Quit()
+
+	auth := smtp.PlainAuth("", c.username, c.password, c.host)
+	if err := client.Auth(auth); err != nil {
+		return fmt.Errorf("smtp: auth failed: %w", err)
+	}
+	if err := client.Mail(c.username); err != nil {
+		return fmt.Errorf("smtp: mail from failed: %w", err)
+	}
+	if err := client.Rcpt(toEmail); err != nil {
+		return fmt.Errorf("smtp: rcpt to failed: %w", err)
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("smtp: data failed: %w", err)
+	}
+	if _, err := w.Write(message); err != nil {
+		w.Close()
+		return fmt.Errorf("smtp: write message failed: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("smtp: close message writer failed: %w", err)
+	}
+
+	return nil
 }
 
 func buildMessage(from, to, subject, htmlBody string) string {

@@ -58,8 +58,10 @@ func Load() (*Config, error) {
 		// Optional: when SMTPUsername/SMTPPassword are unset, the email
 		// client falls back to logging OTPs to the console instead of
 		// calling out to Gmail, so local dev works without SMTP credentials.
-		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPHost: getEnv("SMTP_HOST", "smtp.gmail.com"),
+		// 465 (implicit TLS) rather than 587 (STARTTLS): Render blocks
+		// outbound 587, so the SMTP client dials 465 directly over TLS.
+		SMTPPort:     getEnv("SMTP_PORT", "465"),
 		SMTPUsername: os.Getenv("SMTP_USERNAME"),
 		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
 	}

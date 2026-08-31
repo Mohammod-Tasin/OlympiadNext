@@ -23,6 +23,7 @@ const (
 type User struct {
 	ID                      string
 	Email                   string
+	FullName                *string
 	PasswordHash            *string
 	AuthProvider            AuthProvider
 	GoogleID                *string
@@ -31,6 +32,9 @@ type User struct {
 	Role                    Role
 	IsEmailVerified         bool
 	IsPhoneVerified         bool
+	InstitutionName         *string
+	Level                   *string
+	Medium                  *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 }
