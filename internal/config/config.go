@@ -46,9 +46,13 @@ func Load() (*Config, error) {
 		// deployments (e.g. Vercel + Fly.io on unrelated domains) must set
 		// this to "none", which additionally requires COOKIE_SECURE=true.
 		CookieSameSite: getEnv("COOKIE_SAME_SITE", "lax"),
-		// Two frontends call this API: the client app (default :3000) and
-		// the admin console (default :3001). Production overrides this with
-		// the real deployed origins.
+		// Comma-separated list of exact browser origins allowed to call the
+		// API (CORS + the trusted-origin guard on cookie routes). Two
+		// frontends use it: the web client (default :3000) and the admin
+		// console (default :3001). The localhost fallback is dev-only —
+		// production on Render MUST set ALLOWED_ORIGINS to the deployed
+		// Vercel domains or the live client gets CORS errors. See
+		// .env.example for the deployment note.
 		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")),
 		// Optional: when unset, the SMS client falls back to logging OTPs to
 		// the console instead of calling out to BulkSMSBD, so local dev works

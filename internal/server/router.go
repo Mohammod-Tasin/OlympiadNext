@@ -13,13 +13,18 @@ import (
 	appmw "olympiadnext/internal/http/middleware"
 )
 
-func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHandler, jwtManager *jwt.Manager, users user.Repository, allowedOrigins []string, log *slog.Logger) http.Handler {
+func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHandler, jwtManager *jwt.Manager, users user.Repository, allowedOrigins []string, uploadsDir string, log *slog.Logger) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 	r.Use(appmw.Logging(log))
 	r.Use(appmw.CORS(allowedOrigins))
+
+	// Serve admin-uploaded event images. StripPrefix maps the public
+	// "/uploads/*" path onto the on-disk uploads directory.
+	fileServer := http.FileServer(http.Dir(uploadsDir))
+	r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServer))
 
 	// Render's health checks hit GET/HEAD / on startup; without an
 	// explicit handler here they 404, which Render logs as noise on
@@ -66,6 +71,7 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 
 		r.Route("/events", func(r chi.Router) {
 			r.Post("/", eventHandler.Create)
+			r.Post("/upload", eventHandler.Upload)
 			r.Put("/{eventID}", eventHandler.Update)
 		})
 	})
