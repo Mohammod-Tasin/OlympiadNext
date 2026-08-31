@@ -9,6 +9,15 @@ const (
 	ProviderGoogle AuthProvider = "google"
 )
 
+// Role controls access to the admin surface. New accounts are always
+// students; an admin is promoted out of band (directly in the database).
+type Role string
+
+const (
+	RoleStudent Role = "student"
+	RoleAdmin   Role = "admin"
+)
+
 // User is the core domain entity. PasswordHash and GoogleID are pointers
 // because exactly one may be unset depending on how the account was created.
 type User struct {
@@ -20,6 +29,7 @@ type User struct {
 	GoogleID                *string
 	PhoneNumber             *string
 	ActiveDeviceFingerprint *string
+	Role                    Role
 	IsEmailVerified         bool
 	IsPhoneVerified         bool
 	InstitutionName         *string
@@ -27,6 +37,10 @@ type User struct {
 	Medium                  *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+}
+
+func (u *User) IsAdmin() bool {
+	return u.Role == RoleAdmin
 }
 
 func (u *User) HasPassword() bool {

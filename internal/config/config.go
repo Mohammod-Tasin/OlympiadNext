@@ -46,7 +46,10 @@ func Load() (*Config, error) {
 		// deployments (e.g. Vercel + Fly.io on unrelated domains) must set
 		// this to "none", which additionally requires COOKIE_SECURE=true.
 		CookieSameSite: getEnv("COOKIE_SAME_SITE", "lax"),
-		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "http://localhost:3000")),
+		// Two frontends call this API: the client app (default :3000) and
+		// the admin console (default :3001). Production overrides this with
+		// the real deployed origins.
+		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")),
 		// Optional: when unset, the SMS client falls back to logging OTPs to
 		// the console instead of calling out to BulkSMSBD, so local dev works
 		// without live SMS credentials.

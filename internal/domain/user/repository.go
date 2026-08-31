@@ -13,6 +13,7 @@ type Repository interface {
 	UpdatePassword(ctx context.Context, userID, passwordHash string) error
 	UpdateActiveDeviceFingerprint(ctx context.Context, userID, deviceFingerprint string) error
 	GetActiveDeviceFingerprint(ctx context.Context, userID string) (string, error)
+	GetRole(ctx context.Context, userID string) (Role, error)
 	MarkEmailVerified(ctx context.Context, userID string) error
 	MarkPhoneVerified(ctx context.Context, userID string) error
 	UpdatePhoneNumber(ctx context.Context, userID, phone string) error

@@ -8,8 +8,10 @@ import (
 // CORS allows any of the configured origins (ALLOWED_ORIGINS) to make
 // credentialed requests (needed so the browser sends/receives the
 // HttpOnly refresh cookie). "*" cannot be used together with credentials
-// per the CORS spec, so each allowed origin — e.g. the production Vercel
-// domain plus any preview-deployment domains — must be listed explicitly.
+// per the CORS spec, so each allowed origin — the client frontend, the
+// admin console, plus any preview-deployment domains — must be listed
+// explicitly. Defaults cover http://localhost:3000 (client) and
+// http://localhost:3001 (admin).
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
