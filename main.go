@@ -22,9 +22,14 @@ import (
 	"olympiadnext/internal/platform/db"
 	"olympiadnext/internal/platform/email"
 	"olympiadnext/internal/platform/sms"
+	"olympiadnext/internal/platform/storage"
 	"olympiadnext/internal/repository/postgres"
 	"olympiadnext/internal/server"
 )
+
+// uploadsDir is the project-root folder where admin-uploaded event
+// images are stored and from which the /uploads/* route serves them.
+const uploadsDir = "uploads"
 
 func main() {
 	_ = godotenv.Load() // optional; env vars set by the platform take precedence in prod
@@ -63,10 +68,16 @@ func main() {
 	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, otpRepo, smsSender, emailSender, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
-	eventService := events.NewService(eventRepo, log)
-	eventHandler := handler.NewEventHandler(eventService, log)
+	fileStorage, err := storage.NewLocalStorage(uploadsDir)
+	if err != nil {
+		log.Error("startup: uploads dir init failed", "error", err)
+		os.Exit(1)
+	}
 
-	router := server.NewRouter(authHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, log)
+	eventService := events.NewService(eventRepo, log)
+	eventHandler := handler.NewEventHandler(eventService, fileStorage, log)
+
+	router := server.NewRouter(authHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
 		Addr:         "0.0.0.0:" + cfg.Port,

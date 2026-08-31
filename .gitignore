@@ -5,6 +5,9 @@
 bin/
 /olympiadnext
 
+# Admin-uploaded event images (created at runtime)
+uploads/
+
 # Next.js frontend
 web/node_modules/
 web/.next/
