@@ -1,7 +1,6 @@
 // Package auth contains the application-layer orchestration for
-// registration, email verification, login, Google sign-in and session
-// refresh. It depends only on domain interfaces, never on concrete
-// infrastructure.
+// registration, login, Google sign-in and session refresh. It depends
+// only on domain interfaces, never on concrete infrastructure.
 package auth
 
 import (
@@ -27,18 +26,20 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("auth: invalid email or password")
 	ErrGoogleOnlyAccount  = errors.New("auth: account uses Google sign-in, no password set")
-	ErrEmailNotVerified   = errors.New("auth: email address is not verified")
+	ErrEmailNotVerified   = errors.New("auth: email address not verified")
 	ErrSessionExpired     = errors.New("auth: session expired or revoked")
 	ErrInvalidOTP         = errors.New("auth: invalid or expired code")
-	ErrAlreadyVerified    = errors.New("auth: email address is already verified")
 )
 
 // otpTTL is how long a generated email OTP remains valid.
 const otpTTL = 5 * time.Minute
 
-// otpCodeDigits is the alphabet the OTP generator draws from to build a
-// 6-digit numeric code.
-const otpCodeDigits = "0123456789"
+// otpCodeLength is the number of digits in a verification code, and
+// otpCodeDigits is the alphabet it is drawn from.
+const (
+	otpCodeLength = 6
+	otpCodeDigits = "0123456789"
+)
 
 // TokenPair is what the HTTP layer sends back: the access token in the
 // body and the raw refresh token to be set as an HttpOnly cookie.
@@ -79,9 +80,9 @@ func NewService(
 	}
 }
 
-// Register creates an unverified local account and mails it a 6-digit
-// OTP. It deliberately returns no session: the caller must complete
-// VerifyEmailOTP before Login will hand out tokens.
+// Register creates an email/password account in an unverified state and
+// emails it a one-time code. It does not start a session: the caller must
+// verify their email (VerifyEmailOTP) and then log in.
 func (s *Service) Register(ctx context.Context, rawEmail, password, fullName, institutionName, level, medium string) error {
 	if err := email.ValidateEmail(rawEmail); err != nil {
 		return err
@@ -110,59 +111,9 @@ func (s *Service) Register(ctx context.Context, rawEmail, password, fullName, in
 	}
 
 	s.log.Info("user registered", "user_id", u.ID, "provider", "local")
-	return s.issueEmailOTP(ctx, u)
+	return s.issueEmailOTP(ctx, u.ID, u.Email)
 }
 
-// SendEmailOTP re-issues a verification code, overwriting any code still
-// outstanding. Callers are unauthenticated here (a user awaiting
-// verification has no access token), so the HTTP layer must not leak
-// whether the address exists.
-func (s *Service) SendEmailOTP(ctx context.Context, rawEmail string) error {
-	u, err := s.users.FindByEmail(ctx, rawEmail)
-	if err != nil {
-		return err
-	}
-	if u.EmailVerified {
-		return ErrAlreadyVerified
-	}
-	return s.issueEmailOTP(ctx, u)
-}
-
-// VerifyEmailOTP consumes the outstanding code for the address. On
-// success MarkEmailVerified both sets the flag and nullifies the code, so
-// the same OTP cannot be replayed.
-func (s *Service) VerifyEmailOTP(ctx context.Context, rawEmail, code string) error {
-	u, err := s.users.FindByEmail(ctx, rawEmail)
-	if err != nil {
-		if errors.Is(err, user.ErrNotFound) {
-			return ErrInvalidOTP
-		}
-		return err
-	}
-	if u.EmailVerified {
-		return ErrAlreadyVerified
-	}
-	if u.EmailOTP == nil || u.EmailOTPExpiry == nil {
-		return ErrInvalidOTP
-	}
-
-	// Constant-time compare so a timing side channel cannot be used to
-	// recover the code digit by digit.
-	codeMatches := subtle.ConstantTimeCompare([]byte(*u.EmailOTP), []byte(code)) == 1
-	if !codeMatches || !time.Now().Before(*u.EmailOTPExpiry) {
-		return ErrInvalidOTP
-	}
-
-	if err := s.users.MarkEmailVerified(ctx, u.ID); err != nil {
-		return fmt.Errorf("auth: mark email verified failed: %w", err)
-	}
-
-	s.log.Info("email verified", "user_id", u.ID)
-	return nil
-}
-
-// Login checks the bcrypt hash and refuses accounts whose address has
-// never been confirmed, so an unverified registration cannot be used.
 func (s *Service) Login(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
 	u, err := s.users.FindByEmail(ctx, rawEmail)
 	if err != nil {
@@ -188,8 +139,8 @@ func (s *Service) Login(ctx context.Context, rawEmail, password, deviceFingerpri
 
 // GoogleLogin verifies the ID token with Google, then either logs into
 // an existing Google-linked account, links Google to an existing
-// email/password account, or creates a brand new account. Google has
-// already confirmed the address, so no OTP round-trip is needed.
+// email/password account, or creates a brand new (already-verified,
+// passwordless) account.
 func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint string) (*TokenPair, error) {
 	claims, err := s.googleVerify.Verify(ctx, rawIDToken)
 	if err != nil {
@@ -210,7 +161,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 			return nil, err
 		}
 		existing.GoogleID = &claims.Subject
-		existing.EmailVerified = existing.EmailVerified || claims.EmailVerified
+		existing.EmailVerified = claims.EmailVerified
 		s.log.Info("google account linked to existing user", "user_id", existing.ID)
 		return s.issueTokenPair(ctx, existing, deviceFingerprint)
 
@@ -220,7 +171,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 			FullName:      &claims.Name,
 			AuthProvider:  user.ProviderGoogle,
 			GoogleID:      &claims.Subject,
-			EmailVerified: true,
+			EmailVerified: claims.EmailVerified,
 		}
 		if err := s.users.Create(ctx, newUser); err != nil {
 			return nil, err
@@ -286,23 +237,69 @@ func (s *Service) Logout(ctx context.Context, rawRefreshToken string) error {
 	return err
 }
 
-// issueEmailOTP generates a fresh 6-digit code, persists it with a
-// 5-minute expiry, and mails it over SMTP (or logs it in local dev when
-// no SMTP credentials are configured).
-func (s *Service) issueEmailOTP(ctx context.Context, u *user.User) error {
+// VerifyEmailOTP checks a submitted code against the one stored on the
+// user's row. On success the account is marked verified and the code is
+// cleared. Rejections are deliberately uniform so the endpoint cannot be
+// used to probe which emails are registered.
+func (s *Service) VerifyEmailOTP(ctx context.Context, rawEmail, code string) error {
+	u, err := s.users.FindByEmail(ctx, rawEmail)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			return ErrInvalidOTP
+		}
+		return err
+	}
+
+	if u.EmailVerified {
+		return nil // already verified; a repeat call is a harmless no-op
+	}
+	if u.EmailOTP == nil || u.EmailOTPExpiry == nil {
+		return ErrInvalidOTP
+	}
+
+	codeMatches := subtle.ConstantTimeCompare([]byte(*u.EmailOTP), []byte(code)) == 1
+	if !codeMatches || !time.Now().Before(*u.EmailOTPExpiry) {
+		return ErrInvalidOTP
+	}
+
+	if err := s.users.MarkEmailVerified(ctx, u.ID); err != nil {
+		return fmt.Errorf("auth: mark email verified failed: %w", err)
+	}
+
+	s.log.Info("email verified", "user_id", u.ID)
+	return nil
+}
+
+// ResendEmailOTP issues a fresh code to an unverified account. A missing
+// or already-verified account is a silent success so the endpoint does
+// not leak which emails exist; only a real delivery failure surfaces.
+func (s *Service) ResendEmailOTP(ctx context.Context, rawEmail string) error {
+	u, err := s.users.FindByEmail(ctx, rawEmail)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if u.EmailVerified {
+		return nil
+	}
+	return s.issueEmailOTP(ctx, u.ID, u.Email)
+}
+
+// issueEmailOTP generates a fresh code, persists it with a short expiry,
+// and emails it. Shared by registration and resend.
+func (s *Service) issueEmailOTP(ctx context.Context, userID, toEmail string) error {
 	code, err := generateOTPCode()
 	if err != nil {
 		return fmt.Errorf("auth: generate otp failed: %w", err)
 	}
-
-	if err := s.users.SetEmailOTP(ctx, u.ID, code, time.Now().Add(otpTTL)); err != nil {
+	if err := s.users.SetEmailOTP(ctx, userID, code, time.Now().Add(otpTTL)); err != nil {
 		return fmt.Errorf("auth: persist otp failed: %w", err)
 	}
-	if err := s.emailSender.SendOTP(ctx, u.Email, code); err != nil {
+	if err := s.emailSender.SendOTP(ctx, toEmail, code); err != nil {
 		return fmt.Errorf("auth: send otp email failed: %w", err)
 	}
-
-	s.log.Info("email otp issued", "user_id", u.ID)
 	return nil
 }
 
@@ -341,7 +338,7 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 }
 
 func generateOTPCode() (string, error) {
-	code := make([]byte, 6)
+	code := make([]byte, otpCodeLength)
 	for i := range code {
 		n, err := crand.Int(crand.Reader, big.NewInt(int64(len(otpCodeDigits))))
 		if err != nil {

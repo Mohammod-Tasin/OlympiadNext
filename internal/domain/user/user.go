@@ -9,12 +9,17 @@ const (
 	ProviderGoogle AuthProvider = "google"
 )
 
+// Role controls access to the admin surface. New accounts are always
+// students; an admin is promoted out of band (directly in the database).
+type Role string
+
+const (
+	RoleStudent Role = "student"
+	RoleAdmin   Role = "admin"
+)
+
 // User is the core domain entity. PasswordHash and GoogleID are pointers
 // because exactly one may be unset depending on how the account was created.
-//
-// EmailOTP/EmailOTPExpiry hold the single outstanding email verification
-// code: issuing a new code overwrites the old one, and verifying clears
-// both, so a user never has more than one live code.
 type User struct {
 	ID                      string
 	Email                   string
@@ -23,14 +28,22 @@ type User struct {
 	AuthProvider            AuthProvider
 	GoogleID                *string
 	ActiveDeviceFingerprint *string
+	Role                    Role
 	EmailVerified           bool
-	EmailOTP                *string
-	EmailOTPExpiry          *time.Time
-	InstitutionName         *string
-	Level                   *string
-	Medium                  *string
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	// EmailOTP is the plaintext 6-digit code last issued to verify this
+	// user's email, or nil once it has been consumed or never issued.
+	// EmailOTPExpiry bounds it to a short window (see auth.otpTTL).
+	EmailOTP        *string
+	EmailOTPExpiry  *time.Time
+	InstitutionName *string
+	Level           *string
+	Medium          *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func (u *User) IsAdmin() bool {
+	return u.Role == RoleAdmin
 }
 
 func (u *User) HasPassword() bool {

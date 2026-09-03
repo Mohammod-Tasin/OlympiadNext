@@ -22,13 +22,13 @@ type GoogleLoginRequest struct {
 	DeviceFingerprint string `json:"device_fingerprint,omitempty"`
 }
 
-type SendEmailOTPRequest struct {
-	Email string `json:"email"`
-}
-
 type VerifyEmailOTPRequest struct {
 	Email string `json:"email"`
 	OTP   string `json:"otp"`
+}
+
+type ResendEmailOTPRequest struct {
+	Email string `json:"email"`
 }
 
 type UpdateAcademicProfileRequest struct {

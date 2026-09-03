@@ -12,6 +12,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"olympiadnext/internal/app/events"
 	"olympiadnext/internal/auth"
 	"olympiadnext/internal/auth/google"
 	"olympiadnext/internal/auth/jwt"
@@ -20,9 +21,14 @@ import (
 	"olympiadnext/internal/logger"
 	"olympiadnext/internal/platform/db"
 	"olympiadnext/internal/platform/email"
+	"olympiadnext/internal/platform/storage"
 	"olympiadnext/internal/repository/postgres"
 	"olympiadnext/internal/server"
 )
+
+// uploadsDir is the project-root folder where admin-uploaded event
+// images are stored and from which the /uploads/* route serves them.
+const uploadsDir = "uploads"
 
 func main() {
 	_ = godotenv.Load() // optional; env vars set by the platform take precedence in prod
@@ -51,6 +57,7 @@ func main() {
 	userRepo := postgres.NewUserRepository(conn)
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(conn)
 	deviceRepo := postgres.NewDeviceRepository(conn)
+	eventRepo := postgres.NewEventRepository(conn)
 	emailSender := email.NewSMTPClient(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, log)
 	jwtManager := jwt.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	googleVerifier := google.NewVerifier(cfg.GoogleClientID)
@@ -58,14 +65,25 @@ func main() {
 	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, emailSender, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
-	router := server.NewRouter(authHandler, jwtManager, userRepo, cfg.AllowedOrigins, log)
+	fileStorage, err := storage.NewLocalStorage(uploadsDir)
+	if err != nil {
+		log.Error("startup: uploads dir init failed", "error", err)
+		os.Exit(1)
+	}
+
+	eventService := events.NewService(eventRepo, log)
+	eventHandler := handler.NewEventHandler(eventService, fileStorage, log)
+
+	router := server.NewRouter(authHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
-		Addr:         "0.0.0.0:" + cfg.Port,
-		Handler:      router,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:    "0.0.0.0:" + cfg.Port,
+		Handler: router,
+		// 5-minute read/write windows so a 100 MB event-image upload on a
+		// slow connection is not cut off mid-transfer.
+		ReadTimeout:  5 * time.Minute,
+		WriteTimeout: 5 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {

@@ -8,11 +8,11 @@ import (
 )
 
 // RequireCompleteProfile gates access behind a fully onboarded account:
-// email verified, and full name, institution, level, and medium all filled
-// in. It must run after RequireAccessToken, since it reads the caller's
-// identity from the access-claims context value that middleware sets. It is
-// not applied to /api/auth/* routes so callers can still verify their email
-// and submit the missing profile fields; it's meant for routes reached only
+// email verified, and full name, institution, level, and medium all
+// filled in. It must run after RequireAccessToken, since it reads the
+// caller's identity from the access-claims context value that middleware
+// sets. It is not applied to /api/auth/* routes so callers can still
+// submit the missing profile fields; it's meant for routes reached only
 // once onboarding must be complete (e.g. exams).
 func RequireCompleteProfile(users user.Repository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

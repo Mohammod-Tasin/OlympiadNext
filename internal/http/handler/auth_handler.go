@@ -79,9 +79,6 @@ func NewAuthHandler(authService *auth.Service, users user.Repository, cookieDoma
 	}
 }
 
-// Register creates an unverified account and mails it an OTP. It issues
-// no session on purpose — the client must call VerifyEmailOTP and then
-// Login, so an unconfirmed address never gets tokens.
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	var req dto.RegisterRequest
 	if !decodeJSON(w, r, &req) {
@@ -99,56 +96,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.JSON(w, http.StatusCreated, map[string]string{
-		"message": "account created, verification code sent to your email",
+		"message": "account created; check your email for a verification code",
 	})
-}
-
-// SendEmailOTP re-mails a verification code. The caller is
-// unauthenticated, so the response is identical whether or not the
-// address exists — otherwise this endpoint would enumerate accounts.
-func (h *AuthHandler) SendEmailOTP(w http.ResponseWriter, r *http.Request) {
-	var req dto.SendEmailOTPRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	emailAddr := strings.TrimSpace(req.Email)
-	if emailAddr == "" {
-		response.Error(w, http.StatusBadRequest, "email is required")
-		return
-	}
-
-	err := h.authService.SendEmailOTP(r.Context(), emailAddr)
-	switch {
-	case err == nil, errors.Is(err, user.ErrNotFound), errors.Is(err, auth.ErrAlreadyVerified):
-	default:
-		h.handleAuthError(w, err)
-		return
-	}
-	response.JSON(w, http.StatusOK, map[string]string{
-		"message": "if the account exists and is unverified, a code has been sent",
-	})
-}
-
-// VerifyEmailOTP consumes the code and marks the address verified.
-func (h *AuthHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Request) {
-	var req dto.VerifyEmailOTPRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-
-	emailAddr := strings.TrimSpace(req.Email)
-	code := strings.TrimSpace(req.OTP)
-	if emailAddr == "" || code == "" {
-		response.Error(w, http.StatusBadRequest, "email and otp are required")
-		return
-	}
-
-	if err := h.authService.VerifyEmailOTP(r.Context(), emailAddr, code); err != nil {
-		h.handleAuthError(w, err)
-		return
-	}
-	response.JSON(w, http.StatusOK, map[string]string{"message": "email verified"})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -235,6 +184,53 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// VerifyEmailOTP consumes the code emailed at registration and, on
+// success, marks the account's email address as verified. It is
+// unauthenticated: the caller has registered but cannot log in yet.
+func (h *AuthHandler) VerifyEmailOTP(w http.ResponseWriter, r *http.Request) {
+	var req dto.VerifyEmailOTPRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	email := strings.TrimSpace(req.Email)
+	code := strings.TrimSpace(req.OTP)
+	if email == "" || code == "" {
+		response.Error(w, http.StatusBadRequest, "email and otp are required")
+		return
+	}
+
+	if err := h.authService.VerifyEmailOTP(r.Context(), email, code); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{"message": "email verified"})
+}
+
+// ResendEmailOTP issues a new verification code for an unverified
+// account. The response is identical whether or not the address exists,
+// so it cannot be used to enumerate registered emails.
+func (h *AuthHandler) ResendEmailOTP(w http.ResponseWriter, r *http.Request) {
+	var req dto.ResendEmailOTPRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		response.Error(w, http.StatusBadRequest, "email is required")
+		return
+	}
+
+	if err := h.authService.ResendEmailOTP(r.Context(), email); err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]string{
+		"message": "if the account exists and is unverified, a new code has been sent",
+	})
+}
+
 // UpdateAcademicProfile sets the caller's full name, institution, academic
 // level, and medium of instruction.
 func (h *AuthHandler) UpdateAcademicProfile(w http.ResponseWriter, r *http.Request) {
@@ -273,9 +269,7 @@ func (h *AuthHandler) respondWithSession(w http.ResponseWriter, pair *auth.Token
 func (h *AuthHandler) handleAuthError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, authemail.ErrInvalidEmail),
-		errors.Is(err, authemail.ErrWeakPassword),
-		errors.Is(err, auth.ErrInvalidOTP),
-		errors.Is(err, auth.ErrAlreadyVerified):
+		errors.Is(err, authemail.ErrWeakPassword):
 		response.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, user.ErrEmailTaken):
 		response.Error(w, http.StatusConflict, err.Error())
@@ -283,11 +277,10 @@ func (h *AuthHandler) handleAuthError(w http.ResponseWriter, err error) {
 		errors.Is(err, auth.ErrGoogleOnlyAccount),
 		errors.Is(err, auth.ErrSessionExpired):
 		response.Error(w, http.StatusUnauthorized, err.Error())
-	// 403 rather than 401: the password was right, the account just isn't
-	// verified yet, so the client should route to the OTP screen instead
-	// of back to the login form.
 	case errors.Is(err, auth.ErrEmailNotVerified):
 		response.Error(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, auth.ErrInvalidOTP):
+		response.Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, google.ErrInvalidToken):
 		response.Error(w, http.StatusUnauthorized, "invalid Google credential")
 	default:
