@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/lib/pq"
 
@@ -12,6 +13,12 @@ import (
 )
 
 const pgUniqueViolation = "23505"
+
+// userColumns is the full projection every FindBy* shares, kept in one
+// place so the SELECT list and scanOne can never drift apart.
+const userColumns = `id, email, full_name, password_hash, auth_provider, google_id,
+	active_device_fingerprint, email_verified, email_otp, email_otp_expiry,
+	institution_name, level, medium, created_at, updated_at`
 
 type UserRepository struct {
 	db *sql.DB
@@ -23,12 +30,12 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 
 func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 	const q = `
-		INSERT INTO users (id, email, full_name, password_hash, auth_provider, google_id, is_email_verified, institution_name, level, medium, created_at, updated_at)
+		INSERT INTO users (id, email, full_name, password_hash, auth_provider, google_id, email_verified, institution_name, level, medium, created_at, updated_at)
 		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
-		RETURNING id, is_email_verified, created_at, updated_at`
+		RETURNING id, email_verified, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, u.Email, u.FullName, u.PasswordHash, u.AuthProvider, u.GoogleID, u.IsEmailVerified, u.InstitutionName, u.Level, u.Medium).
-		Scan(&u.ID, &u.IsEmailVerified, &u.CreatedAt, &u.UpdatedAt)
+	err := r.db.QueryRowContext(ctx, q, u.Email, u.FullName, u.PasswordHash, u.AuthProvider, u.GoogleID, u.EmailVerified, u.InstitutionName, u.Level, u.Medium).
+		Scan(&u.ID, &u.EmailVerified, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation {
@@ -40,29 +47,29 @@ func (r *UserRepository) Create(ctx context.Context, u *user.User) error {
 }
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*user.User, error) {
-	const q = `
-		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
-		FROM users WHERE id = $1`
+	const q = `SELECT ` + userColumns + ` FROM users WHERE id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, id))
 }
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*user.User, error) {
-	const q = `
-		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
-		FROM users WHERE LOWER(email) = LOWER($1)`
+	const q = `SELECT ` + userColumns + ` FROM users WHERE LOWER(email) = LOWER($1)`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, email))
 }
 
 func (r *UserRepository) FindByGoogleID(ctx context.Context, googleID string) (*user.User, error) {
-	const q = `
-		SELECT id, email, full_name, password_hash, auth_provider, google_id, phone_number, active_device_fingerprint, is_email_verified, is_phone_verified, institution_name, level, medium, created_at, updated_at
-		FROM users WHERE google_id = $1`
+	const q = `SELECT ` + userColumns + ` FROM users WHERE google_id = $1`
 	return r.scanOne(r.db.QueryRowContext(ctx, q, googleID))
 }
 
-func (r *UserRepository) LinkGoogleID(ctx context.Context, userID, googleID string, isEmailVerified bool) error {
-	const q = `UPDATE users SET google_id = $1, is_email_verified = $2, updated_at = now() WHERE id = $3`
-	res, err := r.db.ExecContext(ctx, q, googleID, isEmailVerified, userID)
+// LinkGoogleID attaches a Google account to an existing user. A Google
+// account whose email Google itself has verified is enough to consider
+// the address verified here, so linking can only ever promote the flag.
+func (r *UserRepository) LinkGoogleID(ctx context.Context, userID, googleID string, emailVerified bool) error {
+	const q = `
+		UPDATE users
+		SET google_id = $1, email_verified = email_verified OR $2, updated_at = now()
+		WHERE id = $3`
+	res, err := r.db.ExecContext(ctx, q, googleID, emailVerified, userID)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation {
@@ -104,20 +111,27 @@ func (r *UserRepository) GetActiveDeviceFingerprint(ctx context.Context, userID 
 	return fingerprint.String, nil
 }
 
-func (r *UserRepository) MarkEmailVerified(ctx context.Context, userID string) error {
-	const q = `UPDATE users SET is_email_verified = true, updated_at = now() WHERE id = $1`
-	res, err := r.db.ExecContext(ctx, q, userID)
+// SetEmailOTP stores the outstanding verification code, overwriting any
+// previous one so only the most recently mailed code can ever be used.
+func (r *UserRepository) SetEmailOTP(ctx context.Context, userID, code string, expiresAt time.Time) error {
+	const q = `UPDATE users SET email_otp = $1, email_otp_expiry = $2, updated_at = now() WHERE id = $3`
+	res, err := r.db.ExecContext(ctx, q, code, expiresAt, userID)
 	if err != nil {
-		return fmt.Errorf("user_repository: mark email verified failed: %w", err)
+		return fmt.Errorf("user_repository: set email otp failed: %w", err)
 	}
 	return checkRowsAffected(res)
 }
 
-func (r *UserRepository) MarkPhoneVerified(ctx context.Context, userID string) error {
-	const q = `UPDATE users SET is_phone_verified = true, updated_at = now() WHERE id = $1`
+// MarkEmailVerified flips the flag and nullifies the code in one
+// statement, so a consumed OTP can never be replayed.
+func (r *UserRepository) MarkEmailVerified(ctx context.Context, userID string) error {
+	const q = `
+		UPDATE users
+		SET email_verified = true, email_otp = NULL, email_otp_expiry = NULL, updated_at = now()
+		WHERE id = $1`
 	res, err := r.db.ExecContext(ctx, q, userID)
 	if err != nil {
-		return fmt.Errorf("user_repository: mark phone verified failed: %w", err)
+		return fmt.Errorf("user_repository: mark email verified failed: %w", err)
 	}
 	return checkRowsAffected(res)
 }
@@ -133,25 +147,11 @@ func (r *UserRepository) UpdateAcademicProfile(ctx context.Context, userID strin
 	return checkRowsAffected(res)
 }
 
-// UpdatePhoneNumber sets the phone number and always resets verification:
-// a changed number has never had an OTP delivered to it, so any prior
-// verified status no longer applies.
-func (r *UserRepository) UpdatePhoneNumber(ctx context.Context, userID, phone string) error {
-	const q = `UPDATE users SET phone_number = $1, is_phone_verified = false, updated_at = now() WHERE id = $2`
-	res, err := r.db.ExecContext(ctx, q, phone, userID)
-	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation {
-			return user.ErrPhoneTaken
-		}
-		return fmt.Errorf("user_repository: update phone number failed: %w", err)
-	}
-	return checkRowsAffected(res)
-}
-
 func (r *UserRepository) scanOne(row *sql.Row) (*user.User, error) {
 	var u user.User
-	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.AuthProvider, &u.GoogleID, &u.PhoneNumber, &u.ActiveDeviceFingerprint, &u.IsEmailVerified, &u.IsPhoneVerified, &u.InstitutionName, &u.Level, &u.Medium, &u.CreatedAt, &u.UpdatedAt)
+	err := row.Scan(&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.AuthProvider, &u.GoogleID,
+		&u.ActiveDeviceFingerprint, &u.EmailVerified, &u.EmailOTP, &u.EmailOTPExpiry,
+		&u.InstitutionName, &u.Level, &u.Medium, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, user.ErrNotFound
 	}

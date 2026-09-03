@@ -11,6 +11,10 @@ const (
 
 // User is the core domain entity. PasswordHash and GoogleID are pointers
 // because exactly one may be unset depending on how the account was created.
+//
+// EmailOTP/EmailOTPExpiry hold the single outstanding email verification
+// code: issuing a new code overwrites the old one, and verifying clears
+// both, so a user never has more than one live code.
 type User struct {
 	ID                      string
 	Email                   string
@@ -18,10 +22,10 @@ type User struct {
 	PasswordHash            *string
 	AuthProvider            AuthProvider
 	GoogleID                *string
-	PhoneNumber             *string
 	ActiveDeviceFingerprint *string
-	IsEmailVerified         bool
-	IsPhoneVerified         bool
+	EmailVerified           bool
+	EmailOTP                *string
+	EmailOTPExpiry          *time.Time
 	InstitutionName         *string
 	Level                   *string
 	Medium                  *string
