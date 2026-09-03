@@ -39,6 +39,8 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 		r.Use(appmw.RateLimitByIP(30, 10))
 
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/register", authHandler.Register)
+		// Email verification is unauthenticated by necessity: a user who
+		// has not verified yet is never issued an access token.
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/verify-email-otp", authHandler.VerifyEmailOTP)
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/resend-email-otp", authHandler.ResendEmailOTP)
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/login", authHandler.Login)
