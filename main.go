@@ -21,7 +21,6 @@ import (
 	"olympiadnext/internal/logger"
 	"olympiadnext/internal/platform/db"
 	"olympiadnext/internal/platform/email"
-	"olympiadnext/internal/platform/sms"
 	"olympiadnext/internal/platform/storage"
 	"olympiadnext/internal/repository/postgres"
 	"olympiadnext/internal/server"
@@ -58,14 +57,12 @@ func main() {
 	userRepo := postgres.NewUserRepository(conn)
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(conn)
 	deviceRepo := postgres.NewDeviceRepository(conn)
-	otpRepo := postgres.NewOTPRepository(conn)
 	eventRepo := postgres.NewEventRepository(conn)
-	smsSender := sms.NewBulkSMSBDClient(cfg.BulkSMSBDAPIKey, cfg.BulkSMSBDSenderID, log)
 	emailSender := email.NewSMTPClient(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, log)
 	jwtManager := jwt.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	googleVerifier := google.NewVerifier(cfg.GoogleClientID)
 
-	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, otpRepo, smsSender, emailSender, jwtManager, googleVerifier, log)
+	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, emailSender, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
 	fileStorage, err := storage.NewLocalStorage(uploadsDir)

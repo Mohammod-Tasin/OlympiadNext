@@ -27,16 +27,19 @@ type User struct {
 	PasswordHash            *string
 	AuthProvider            AuthProvider
 	GoogleID                *string
-	PhoneNumber             *string
 	ActiveDeviceFingerprint *string
 	Role                    Role
-	IsEmailVerified         bool
-	IsPhoneVerified         bool
-	InstitutionName         *string
-	Level                   *string
-	Medium                  *string
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	EmailVerified           bool
+	// EmailOTP is the plaintext 6-digit code last issued to verify this
+	// user's email, or nil once it has been consumed or never issued.
+	// EmailOTPExpiry bounds it to a short window (see auth.otpTTL).
+	EmailOTP        *string
+	EmailOTPExpiry  *time.Time
+	InstitutionName *string
+	Level           *string
+	Medium          *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (u *User) IsAdmin() bool {

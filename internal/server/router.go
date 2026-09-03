@@ -39,6 +39,8 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 		r.Use(appmw.RateLimitByIP(30, 10))
 
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/register", authHandler.Register)
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/verify-email-otp", authHandler.VerifyEmailOTP)
+		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/resend-email-otp", authHandler.ResendEmailOTP)
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/login", authHandler.Login)
 		r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/google", authHandler.GoogleLogin)
 
@@ -48,9 +50,6 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAccessToken(jwtManager, users))
 			r.Get("/me", authHandler.Me)
-			r.Post("/send-otp", authHandler.SendOTP)
-			r.Post("/verify-otp", authHandler.VerifyOTP)
-			r.Post("/update-phone", authHandler.UpdatePhoneNumber)
 			r.Put("/profile", authHandler.UpdateAcademicProfile)
 		})
 	})

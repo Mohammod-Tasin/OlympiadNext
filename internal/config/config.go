@@ -8,24 +8,22 @@ import (
 )
 
 type Config struct {
-	Env               string
-	Port              string
-	DatabaseURL       string
-	JWTAccessSecret   string
-	JWTRefreshSecret  string
-	AccessTokenTTL    time.Duration
-	RefreshTokenTTL   time.Duration
-	GoogleClientID    string
-	CookieDomain      string
-	CookieSecure      bool
-	CookieSameSite    string
-	AllowedOrigins    []string
-	BulkSMSBDAPIKey   string
-	BulkSMSBDSenderID string
-	SMTPHost          string
-	SMTPPort          string
-	SMTPUsername      string
-	SMTPPassword      string
+	Env              string
+	Port             string
+	DatabaseURL      string
+	JWTAccessSecret  string
+	JWTRefreshSecret string
+	AccessTokenTTL   time.Duration
+	RefreshTokenTTL  time.Duration
+	GoogleClientID   string
+	CookieDomain     string
+	CookieSecure     bool
+	CookieSameSite   string
+	AllowedOrigins   []string
+	SMTPHost         string
+	SMTPPort         string
+	SMTPUsername     string
+	SMTPPassword     string
 }
 
 // Load reads configuration from the environment and fails fast if a
@@ -54,11 +52,6 @@ func Load() (*Config, error) {
 		// Vercel domains or the live client gets CORS errors. See
 		// .env.example for the deployment note.
 		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001")),
-		// Optional: when unset, the SMS client falls back to logging OTPs to
-		// the console instead of calling out to BulkSMSBD, so local dev works
-		// without live SMS credentials.
-		BulkSMSBDAPIKey:   os.Getenv("BULKSMSBD_API_KEY"),
-		BulkSMSBDSenderID: os.Getenv("BULKSMSBD_SENDER_ID"),
 		// Optional: when SMTPUsername/SMTPPassword are unset, the email
 		// client falls back to logging OTPs to the console instead of
 		// calling out to Gmail, so local dev works without SMTP credentials.
