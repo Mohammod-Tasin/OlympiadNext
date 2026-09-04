@@ -11,6 +11,8 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	domainemail "olympiadnext/internal/domain/email"
 )
 
 // dialTimeout bounds how long an outbound SMTP send may take, including
@@ -35,7 +37,8 @@ func NewSMTPClient(host, port, username, password string, log *slog.Logger) *SMT
 
 // SendOTP emails a 6-digit verification code to toEmail. When no SMTP
 // credentials are configured (local development) it logs the code
-// instead, so OTP flows keep working without a live mailbox.
+// instead, so OTP flows keep working without a live mailbox. A live send
+// that fails returns an error wrapping domain/email.ErrDeliveryFailed.
 func (c *SMTPClient) SendOTP(ctx context.Context, toEmail, code string) error {
 	if c.username == "" || c.password == "" {
 		c.log.Info(fmt.Sprintf("Email OTP to %s: %s", toEmail, code))
@@ -43,7 +46,14 @@ func (c *SMTPClient) SendOTP(ctx context.Context, toEmail, code string) error {
 	}
 
 	message := buildMessage(c.username, toEmail, otpEmailSubject, otpEmailHTML(code))
-	return c.sendWithTimeout(ctx, toEmail, []byte(message))
+	if err := c.sendWithTimeout(ctx, toEmail, []byte(message)); err != nil {
+		// Every transport failure — a blocked port, a timeout, a rejected
+		// recipient — is reported as ErrDeliveryFailed. The code has been
+		// generated and stored; whether an undelivered code is fatal is
+		// the caller's call, not the transport's.
+		return fmt.Errorf("%w: %v", domainemail.ErrDeliveryFailed, err)
+	}
+	return nil
 }
 
 // sendWithTimeout runs send on a goroutine and races it against ctx and
@@ -59,7 +69,7 @@ func (c *SMTPClient) sendWithTimeout(ctx context.Context, toEmail string, messag
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		return fmt.Errorf("smtp dial timeout")
+		return fmt.Errorf("send to %s timed out after %s", toEmail, dialTimeout)
 	}
 }
 
