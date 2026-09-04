@@ -32,7 +32,7 @@ func NewRouter(
 	r.Use(appmw.Logging(log))
 	r.Use(appmw.CORS(allowedOrigins))
 
-	mountUploads(r, uploadsDir, userHandler, jwtManager, users)
+	mountUploads(r, uploadsDir, userHandler)
 
 	// Render's health checks hit GET/HEAD / on startup; without an
 	// explicit handler here they 404, which Render logs as noise on
@@ -106,17 +106,17 @@ func NewRouter(
 
 // mountUploads wires the static file server for uploaded assets. Event
 // images (at the uploads root) are public; student KYC files, which live
-// under users/<ownerID>/, are identity documents and are served only
-// through the authenticated ServeUserFile handler — the public file
-// server explicitly refuses anything under users/.
-func mountUploads(r chi.Router, uploadsDir string, userHandler *handler.UserHandler, jwtManager *jwt.Manager, users user.Repository) {
+// under users/<ownerID>/, are identity documents. ServeUserFile
+// authenticates the Bearer token and enforces owner-or-admin access
+// itself (it is not behind RequireAccessToken — see its doc comment), and
+// the public file server explicitly refuses anything under users/.
+func mountUploads(r chi.Router, uploadsDir string, userHandler *handler.UserHandler) {
 	const userPrefix = "users/"
 
 	publicFiles := http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir)))
 
 	r.Route("/uploads", func(r chi.Router) {
-		r.With(appmw.RequireAccessToken(jwtManager, users)).
-			Get("/users/{userID}/{name}", userHandler.ServeUserFile)
+		r.Get("/users/{userID}/{name}", userHandler.ServeUserFile)
 
 		r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			rel := strings.TrimPrefix(req.URL.Path, "/uploads/")

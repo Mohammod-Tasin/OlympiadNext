@@ -72,7 +72,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	userHandler := handler.NewUserHandler(userRepo, fileStorage, log)
+	userHandler := handler.NewUserHandler(userRepo, fileStorage, jwtManager, log)
 	adminHandler := handler.NewAdminHandler(userRepo, log)
 
 	eventService := events.NewService(eventRepo, log)

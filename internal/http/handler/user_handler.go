@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"olympiadnext/internal/auth/jwt"
 	"olympiadnext/internal/domain/user"
 	"olympiadnext/internal/http/dto"
 	"olympiadnext/internal/http/middleware"
@@ -30,11 +31,12 @@ const userFileSubdir = "users"
 type UserHandler struct {
 	users   user.Repository
 	storage *storage.LocalStorage
+	jwt     *jwt.Manager
 	log     *slog.Logger
 }
 
-func NewUserHandler(users user.Repository, fileStorage *storage.LocalStorage, log *slog.Logger) *UserHandler {
-	return &UserHandler{users: users, storage: fileStorage, log: log}
+func NewUserHandler(users user.Repository, fileStorage *storage.LocalStorage, jwtManager *jwt.Manager, log *slog.Logger) *UserHandler {
+	return &UserHandler{users: users, storage: fileStorage, jwt: jwtManager, log: log}
 }
 
 // UploadFile handles POST /api/user/upload-file: a multipart/form-data
@@ -159,12 +161,20 @@ func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ServeUserFile handles GET /uploads/users/{userID}/{name}: a KYC file is
-// an identity document, so it is served only to its owner or an admin.
+// ServeUserFile handles GET /uploads/users/{userID}/{name}. A KYC file is
+// an identity document, so it is served only to the user who owns it or
+// to an admin.
+//
+// It authenticates the Bearer token itself rather than sitting behind
+// RequireAccessToken: a browser cannot attach the X-Device-Fingerprint
+// header to an <img> or download request, so that middleware's
+// single-device gate would 401 every legitimate document view even with a
+// valid token. Here the rule is simply: no/invalid token -> 401; a valid
+// token that is neither the owner nor an admin -> 403.
 func (h *UserHandler) ServeUserFile(w http.ResponseWriter, r *http.Request) {
-	claims, ok := middleware.AccessClaimsFromContext(r.Context())
-	if !ok {
-		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+	claims, err := h.jwt.ParseAccessToken(middleware.ExtractBearerToken(r.Header.Get("Authorization")))
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, "missing or invalid access token")
 		return
 	}
 
@@ -173,9 +183,13 @@ func (h *UserHandler) ServeUserFile(w http.ResponseWriter, r *http.Request) {
 
 	if claims.UserID != ownerID {
 		role, err := h.users.GetRole(r.Context(), claims.UserID)
-		if err != nil || role != user.RoleAdmin {
-			// 404, not 403: don't confirm the file exists to a stranger.
-			response.Error(w, http.StatusNotFound, "file not found")
+		if err != nil {
+			h.log.Error("serve user file: role lookup failed", "user_id", claims.UserID, "error", err)
+			response.Error(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		if role != user.RoleAdmin {
+			response.Error(w, http.StatusForbidden, "not authorized to view this file")
 			return
 		}
 	}
