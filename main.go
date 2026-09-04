@@ -26,8 +26,9 @@ import (
 	"olympiadnext/internal/server"
 )
 
-// uploadsDir is the project-root folder where admin-uploaded event
-// images are stored and from which the /uploads/* route serves them.
+// uploadsDir is the project-root folder where uploaded assets live —
+// admin event images at the root, student KYC files under users/<id>/ —
+// and from which the /uploads/* routes serve them.
 const uploadsDir = "uploads"
 
 func main() {
@@ -71,10 +72,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	userHandler := handler.NewUserHandler(userRepo, fileStorage, log)
+	adminHandler := handler.NewAdminHandler(userRepo, log)
+
 	eventService := events.NewService(eventRepo, log)
 	eventHandler := handler.NewEventHandler(eventService, fileStorage, log)
 
-	router := server.NewRouter(authHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
+	router := server.NewRouter(authHandler, userHandler, adminHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + cfg.Port,

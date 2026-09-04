@@ -23,5 +23,12 @@ type Repository interface {
 	// MarkEmailVerified flips email_verified to true and clears any
 	// outstanding OTP so a spent code can never be replayed.
 	MarkEmailVerified(ctx context.Context, userID string) error
-	UpdateAcademicProfile(ctx context.Context, userID string, fullName, institution, level, medium string) error
+	// SubmitOnboardingProfile writes the academic fields and KYC file
+	// references and moves the account to 'pending' review in one UPDATE.
+	SubmitOnboardingProfile(ctx context.Context, userID string, p OnboardingProfile) error
+	// ListUsers returns users newest-first. A non-empty status filters to
+	// that verification state; limit caps the row count.
+	ListUsers(ctx context.Context, status VerificationStatus, limit int) ([]*User, error)
+	// SetVerificationStatus records an admin's review decision.
+	SetVerificationStatus(ctx context.Context, userID string, status VerificationStatus) error
 }
