@@ -86,7 +86,11 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   code can't be replayed. `/login` refuses an unverified account with 403.
   `/send-email-otp` re-issues a code and always answers with the same generic
   message so it can't enumerate accounts. Google sign-in skips all of this —
-  Google has already confirmed the address.
+  Google has already confirmed the address. OTP delivery is best-effort: the
+  SMTP sender wraps a failed send in `email.ErrDeliveryFailed`, and
+  `issueEmailOTP` logs the code as a `WARN` and returns success rather than
+  failing the request — Render blocks outbound SMTP (465/587), so a live send
+  times out there every time.
 - **Student verification (KYC).** `users.verification_status` moves
   `unverified → pending → verified | rejected` (rejected users may resubmit).
   `POST /api/user/upload-file` stores a PDF/image under `uploads/users/<userID>/`

@@ -285,7 +285,8 @@ func (s *Service) ResendEmailOTP(ctx context.Context, rawEmail string) error {
 }
 
 // issueEmailOTP generates a fresh code, persists it with a short expiry,
-// and emails it. Shared by registration and resend.
+// and makes a best-effort attempt to email it. Shared by registration and
+// resend. A delivery failure is logged, not returned.
 func (s *Service) issueEmailOTP(ctx context.Context, userID, toEmail string) error {
 	code, err := generateOTPCode()
 	if err != nil {
@@ -294,7 +295,19 @@ func (s *Service) issueEmailOTP(ctx context.Context, userID, toEmail string) err
 	if err := s.users.SetEmailOTP(ctx, userID, code, time.Now().Add(otpTTL)); err != nil {
 		return fmt.Errorf("auth: persist otp failed: %w", err)
 	}
+
+	// OTP email delivery is best-effort. Render blocks outbound SMTP, so a
+	// live send times out there on every attempt; failing here would 500
+	// the registration (and resend) request even though the account is
+	// created and the code is already stored. Log the code as a WARNING so
+	// the flow can still be finished from the server console, and report
+	// success. A non-delivery error is genuinely unexpected and still
+	// propagates.
 	if err := s.emailSender.SendOTP(ctx, toEmail, code); err != nil {
+		if errors.Is(err, notifyemail.ErrDeliveryFailed) {
+			s.log.Warn(fmt.Sprintf("SMTP failed. OTP for %s is: %s", toEmail, code), "error", err)
+			return nil
+		}
 		return fmt.Errorf("auth: send otp email failed: %w", err)
 	}
 	return nil
