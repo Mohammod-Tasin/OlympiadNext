@@ -63,7 +63,7 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `POST /api/auth/refresh`, `/logout` | refresh cookie |
 | `GET /api/auth/me` | access token |
 | `POST /api/user/upload-file` (multipart `file`; PDF or image) | access token |
-| `PUT /api/user/profile` (onboarding: academic fields + `verification_doc`) | access token |
+| `PUT /api/user/profile` (onboarding + profile edits: academic fields, optional `verification_doc`) | access token |
 | `GET /api/client/events` | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
@@ -90,9 +90,12 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 - **Student verification (KYC).** `users.verification_status` moves
   `unverified → pending → verified | rejected` (rejected users may resubmit).
   `POST /api/user/upload-file` stores a PDF/image under `uploads/users/<userID>/`
-  and returns its URL; `PUT /api/user/profile` saves the academic fields plus that
-  `verification_doc` (required) and an optional `profile_picture`, flipping the
-  status to `pending`. Admins review via `GET /api/admin/users?status=pending` and
+  and returns its URL; `PUT /api/user/profile` serves both onboarding and later
+  profile edits — it always saves the academic fields and an optional
+  `profile_picture`. `verification_doc` is optional: a new value replaces the
+  stored document and flips the status to `pending`; omitting it keeps the
+  document and status already on file, so a verified user can edit their name
+  without re-entering review. Admins review via `GET /api/admin/users?status=pending` and
   decide with `PUT /api/admin/users/{id}/verify` (`{"status":"verified"|"rejected"}`).
   KYC files are identity documents: `/uploads/users/*` is served only to the owning
   user or an admin (Bearer token), while event images under `/uploads/*` stay public.

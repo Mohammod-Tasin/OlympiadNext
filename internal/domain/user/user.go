@@ -73,16 +73,18 @@ type User struct {
 	UpdatedAt          time.Time
 }
 
-// OnboardingProfile is the payload a student submits to finish onboarding:
-// their academic details plus the uploaded KYC files. Submitting it moves
-// the account to 'pending' review.
+// OnboardingProfile is the payload behind PUT /api/user/profile, used for
+// both first-time onboarding and later profile edits.
 type OnboardingProfile struct {
 	FullName        string
 	InstitutionName string
 	Level           string
 	Medium          string
+	// VerificationDoc is optional: an empty string keeps the document and
+	// verification status already on file; a new value replaces the
+	// document and re-opens 'pending' review.
 	VerificationDoc string
-	ProfilePicture  *string // optional
+	ProfilePicture  *string // optional; nil keeps the stored picture
 }
 
 func (u *User) IsAdmin() bool {

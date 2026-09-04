@@ -90,9 +90,12 @@ func (h *UserHandler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, dto.UploadFileResponse{URL: url})
 }
 
-// SubmitProfile handles PUT /api/user/profile: the onboarding submission.
-// It validates the academic fields, requires a verification_doc the caller
-// actually uploaded, and moves the account to 'pending' review.
+// SubmitProfile handles PUT /api/user/profile for both first-time
+// onboarding and later profile edits. It always validates and saves the
+// academic fields. verification_doc is optional: omitting it keeps the
+// document — and verification status — already on file, so a verified
+// user can edit their name freely; supplying a new one the caller
+// uploaded re-opens 'pending' review.
 func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 	claims, ok := middleware.AccessClaimsFromContext(r.Context())
 	if !ok {
@@ -111,12 +114,10 @@ func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An empty verification_doc means "leave my document untouched". Only
+	// validate ownership when the caller actually supplies a new one.
 	doc := strings.TrimSpace(req.VerificationDoc)
-	if doc == "" {
-		response.Error(w, http.StatusBadRequest, "verification_doc is required")
-		return
-	}
-	if !isOwnedUserFileURL(doc, claims.UserID) {
+	if doc != "" && !isOwnedUserFileURL(doc, claims.UserID) {
 		response.Error(w, http.StatusBadRequest, "verification_doc must be a file you uploaded")
 		return
 	}
@@ -130,7 +131,7 @@ func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 		picture = &p
 	}
 
-	err := h.users.SubmitOnboardingProfile(r.Context(), claims.UserID, user.OnboardingProfile{
+	status, err := h.users.SubmitOnboardingProfile(r.Context(), claims.UserID, user.OnboardingProfile{
 		FullName:        fullName,
 		InstitutionName: institution,
 		Level:           level,
@@ -148,9 +149,13 @@ func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	msg := "profile updated"
+	if doc != "" {
+		msg = "profile submitted for verification"
+	}
 	response.JSON(w, http.StatusOK, map[string]string{
-		"message":             "profile submitted for verification",
-		"verification_status": string(user.VerificationPending),
+		"message":             msg,
+		"verification_status": string(status),
 	})
 }
 
