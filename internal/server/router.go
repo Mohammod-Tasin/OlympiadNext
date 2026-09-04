@@ -3,6 +3,7 @@ package server
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -13,7 +14,17 @@ import (
 	appmw "olympiadnext/internal/http/middleware"
 )
 
-func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHandler, jwtManager *jwt.Manager, users user.Repository, allowedOrigins []string, uploadsDir string, log *slog.Logger) http.Handler {
+func NewRouter(
+	authHandler *handler.AuthHandler,
+	userHandler *handler.UserHandler,
+	adminHandler *handler.AdminHandler,
+	eventHandler *handler.EventHandler,
+	jwtManager *jwt.Manager,
+	users user.Repository,
+	allowedOrigins []string,
+	uploadsDir string,
+	log *slog.Logger,
+) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(chimw.Recoverer)
@@ -21,10 +32,7 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 	r.Use(appmw.Logging(log))
 	r.Use(appmw.CORS(allowedOrigins))
 
-	// Serve admin-uploaded event images. StripPrefix maps the public
-	// "/uploads/*" path onto the on-disk uploads directory.
-	fileServer := http.FileServer(http.Dir(uploadsDir))
-	r.Handle("/uploads/*", http.StripPrefix("/uploads/", fileServer))
+	mountUploads(r, uploadsDir, userHandler, jwtManager, users)
 
 	// Render's health checks hit GET/HEAD / on startup; without an
 	// explicit handler here they 404, which Render logs as noise on
@@ -52,8 +60,17 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAccessToken(jwtManager, users))
 			r.Get("/me", authHandler.Me)
-			r.Put("/profile", authHandler.UpdateAcademicProfile)
 		})
+	})
+
+	// Authenticated student surface: KYC file uploads and the onboarding
+	// profile submission.
+	r.Route("/api/user", func(r chi.Router) {
+		r.Use(appmw.RateLimitByIP(30, 10))
+		r.Use(appmw.RequireAccessToken(jwtManager, users))
+
+		r.Post("/upload-file", userHandler.UploadFile)
+		r.Put("/profile", userHandler.SubmitProfile)
 	})
 
 	// Client surface: public, read-only content consumed by the client
@@ -75,6 +92,9 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 			r.Post("/upload", eventHandler.Upload)
 			r.Put("/{eventID}", eventHandler.Update)
 		})
+
+		r.Get("/users", adminHandler.ListUsers)
+		r.Put("/users/{id}/verify", adminHandler.VerifyUser)
 	})
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -82,4 +102,29 @@ func NewRouter(authHandler *handler.AuthHandler, eventHandler *handler.EventHand
 	})
 
 	return r
+}
+
+// mountUploads wires the static file server for uploaded assets. Event
+// images (at the uploads root) are public; student KYC files, which live
+// under users/<ownerID>/, are identity documents and are served only
+// through the authenticated ServeUserFile handler — the public file
+// server explicitly refuses anything under users/.
+func mountUploads(r chi.Router, uploadsDir string, userHandler *handler.UserHandler, jwtManager *jwt.Manager, users user.Repository) {
+	const userPrefix = "users/"
+
+	publicFiles := http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir)))
+
+	r.Route("/uploads", func(r chi.Router) {
+		r.With(appmw.RequireAccessToken(jwtManager, users)).
+			Get("/users/{userID}/{name}", userHandler.ServeUserFile)
+
+		r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			rel := strings.TrimPrefix(req.URL.Path, "/uploads/")
+			if rel == strings.TrimSuffix(userPrefix, "/") || strings.HasPrefix(rel, userPrefix) {
+				http.NotFound(w, req)
+				return
+			}
+			publicFiles.ServeHTTP(w, req)
+		}))
+	})
 }

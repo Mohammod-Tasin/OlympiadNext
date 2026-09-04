@@ -112,15 +112,22 @@ All auth routes are rate-limited per IP (30 requests/minute, burst 10).
 | Method | Path | Auth required | Description |
 |---|---|---|---|
 | GET | `/healthz` | no | Liveness check |
-| POST | `/api/auth/register` | no | Register with email + password; emails a 6-digit code and returns no session |
+| POST | `/api/auth/register` | no | Register with email + password only; emails a 6-digit code and returns no session |
 | POST | `/api/auth/verify-email-otp` | no | Body `{ email, otp }`; on success marks the email verified |
 | POST | `/api/auth/resend-email-otp` | no | Body `{ email }`; re-sends a code for an unverified account (uniform response) |
 | POST | `/api/auth/login` | no | Log in with email + password; requires a verified email (`403` otherwise) |
 | POST | `/api/auth/google` | no | Sign in / sign up with a Google ID token (`{ id_token }`) |
 | POST | `/api/auth/refresh` | refresh cookie | Rotates the refresh token and issues a new access token |
 | POST | `/api/auth/logout` | refresh cookie | Revokes the refresh token and clears the cookie |
-| GET | `/api/auth/me` | access token | Returns the authenticated user's profile |
-| PUT | `/api/auth/profile` | access token | Updates full name, institution, level, and medium |
+| GET | `/api/auth/me` | access token | Returns the authenticated user's profile + verification status |
+| POST | `/api/user/upload-file` | access token | `multipart/form-data` with a `file` field (PDF or image); returns `{ url }` |
+| PUT | `/api/user/profile` | access token | Onboarding submission: academic fields + `verification_doc` (req.) + `profile_picture` (opt.); sets `verification_status` = `pending` |
+| GET | `/api/client/events` | no | The single active event, or 404 |
+| POST/PUT | `/api/admin/events…` | access token + admin | Create/update events and upload event images |
+| GET | `/api/admin/users` | access token + admin | List users; `?status=pending\|verified\|rejected\|unverified` filters |
+| PUT | `/api/admin/users/{id}/verify` | access token + admin | Body `{ "status": "verified" \| "rejected" }` |
+| GET | `/uploads/*` | no | Event images |
+| GET | `/uploads/users/{userID}/{name}` | access token | KYC files — owner or admin only |
 
 The refresh token is set as an HttpOnly cookie; the access token is returned in the JSON response body and expected in the `Authorization: Bearer <token>` header on protected routes.
 
@@ -131,6 +138,15 @@ The refresh token is set as an HttpOnly cookie; the access token is returned in 
 3. `POST /api/auth/login` succeeds only once the email is verified.
 
 Google accounts are created already-verified with no password.
+
+### Student verification (KYC) flow
+
+1. After logging in, the student `POST`s their proof document (PDF or image) and, optionally, a profile picture to `/api/user/upload-file`. Each call returns a `{ url }` under `/uploads/users/<userID>/`.
+2. `PUT /api/user/profile` submits the academic fields plus `verification_doc` (and optional `profile_picture`). This sets `verification_status` to `pending`.
+3. An admin lists the queue with `GET /api/admin/users?status=pending`, fetches each `verification_doc` (admins may read any `/uploads/users/*` file with their token), and decides with `PUT /api/admin/users/{id}/verify`.
+4. A `rejected` student can re-run steps 1–2, returning to `pending`.
+
+`verification_status` is one of `unverified` (default), `pending`, `verified`, `rejected`.
 
 ## Security features
 

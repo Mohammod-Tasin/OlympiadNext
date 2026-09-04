@@ -3,12 +3,8 @@ package dto
 import "time"
 
 type RegisterRequest struct {
-	Email           string `json:"email"`
-	Password        string `json:"password"`
-	FullName        string `json:"full_name"`
-	InstitutionName string `json:"institution_name"`
-	Level           string `json:"level"`
-	Medium          string `json:"medium"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type LoginRequest struct {
@@ -31,24 +27,20 @@ type ResendEmailOTPRequest struct {
 	Email string `json:"email"`
 }
 
-type UpdateAcademicProfileRequest struct {
-	FullName        string `json:"full_name"`
-	InstitutionName string `json:"institution_name"`
-	Level           string `json:"level"`
-	Medium          string `json:"medium"`
-}
-
 type AuthResponse struct {
 	AccessToken          string    `json:"access_token"`
 	AccessTokenExpiresAt time.Time `json:"access_token_expires_at"`
 }
 
 type UserResponse struct {
-	UserID          string  `json:"user_id"`
-	Email           string  `json:"email"`
-	FullName        *string `json:"full_name,omitempty"`
-	EmailVerified   bool    `json:"email_verified"`
-	InstitutionName *string `json:"institution_name,omitempty"`
-	Level           *string `json:"level,omitempty"`
-	Medium          *string `json:"medium,omitempty"`
+	UserID             string  `json:"user_id"`
+	Email              string  `json:"email"`
+	FullName           *string `json:"full_name,omitempty"`
+	EmailVerified      bool    `json:"email_verified"`
+	InstitutionName    *string `json:"institution_name,omitempty"`
+	Level              *string `json:"level,omitempty"`
+	Medium             *string `json:"medium,omitempty"`
+	ProfilePicture     *string `json:"profile_picture,omitempty"`
+	VerificationDoc    *string `json:"verification_doc,omitempty"`
+	VerificationStatus string  `json:"verification_status"`
 }

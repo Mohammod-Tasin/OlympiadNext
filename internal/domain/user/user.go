@@ -18,6 +18,30 @@ const (
 	RoleAdmin   Role = "admin"
 )
 
+// VerificationStatus tracks where an account sits in the manual student
+// verification (KYC) review: 'unverified' until a proof document is
+// submitted, 'pending' while it waits for an admin, then 'verified' or
+// 'rejected' once reviewed. A rejected user may resubmit, returning to
+// 'pending'.
+type VerificationStatus string
+
+const (
+	VerificationUnverified VerificationStatus = "unverified"
+	VerificationPending    VerificationStatus = "pending"
+	VerificationVerified   VerificationStatus = "verified"
+	VerificationRejected   VerificationStatus = "rejected"
+)
+
+// Valid reports whether s is one of the four defined states.
+func (s VerificationStatus) Valid() bool {
+	switch s {
+	case VerificationUnverified, VerificationPending, VerificationVerified, VerificationRejected:
+		return true
+	default:
+		return false
+	}
+}
+
 // User is the core domain entity. PasswordHash and GoogleID are pointers
 // because exactly one may be unset depending on how the account was created.
 type User struct {
@@ -38,8 +62,27 @@ type User struct {
 	InstitutionName *string
 	Level           *string
 	Medium          *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// ProfilePicture and VerificationDoc hold public URL paths returned by
+	// the file-upload endpoint (e.g. "/uploads/users/<id>/<uuid>.pdf").
+	// ProfilePicture is optional; VerificationDoc is required to leave the
+	// 'unverified' state.
+	ProfilePicture     *string
+	VerificationDoc    *string
+	VerificationStatus VerificationStatus
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// OnboardingProfile is the payload a student submits to finish onboarding:
+// their academic details plus the uploaded KYC files. Submitting it moves
+// the account to 'pending' review.
+type OnboardingProfile struct {
+	FullName        string
+	InstitutionName string
+	Level           string
+	Medium          string
+	VerificationDoc string
+	ProfilePicture  *string // optional
 }
 
 func (u *User) IsAdmin() bool {

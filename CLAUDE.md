@@ -9,8 +9,10 @@ credentials, which is why cookie flags and CORS are so configurable.
 Authentication is email/password (with an emailed OTP) plus Google OAuth. There
 is no phone/SMS auth — it was removed.
 
-Only the auth/identity foundation exists. Contests, problems, submissions, scoring,
-and roles are **not built yet** — don't assume they exist.
+Built so far: the auth/identity foundation, `student`/`admin` roles, admin-curated
+**events** (client-facing content blocks + image upload), and a manual **student
+verification (KYC)** flow (upload a proof document, admin approves/rejects).
+Contests, problems, submissions, and scoring are **not built yet**.
 
 ## Commands
 
@@ -35,11 +37,12 @@ Layered, hand-wired dependency injection in `main.go` (no DI framework):
 main.go                      config → db connect+migrate → repos → services → handlers → router
 internal/config/             env loading, fails fast on missing secrets
 internal/domain/             entities + repository INTERFACES + sentinel errors
-  user/ token/ device/ email/
+  user/ token/ device/ email/ event/
 internal/auth/               service.go = all orchestration; sub-pkgs jwt/ hash/ google/ email/
+internal/app/events/         event service (admin content orchestration)
 internal/repository/postgres/ implementations of the domain interfaces
-internal/http/               handler/ middleware/ dto/ response/
-internal/platform/           db/ (+ embedded migrations/), email/ (SMTP)
+internal/http/               handler/ (auth, user, admin, event) middleware/ dto/ response/
+internal/platform/           db/ (+ embedded migrations/), email/ (SMTP), storage/ (local uploads)
 internal/server/router.go    the whole route table
 ```
 
@@ -55,11 +58,17 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | Route | Auth |
 |---|---|
 | `GET /`, `HEAD /`, `GET /healthz` | none (Render health checks) |
-| `POST /api/auth/register`, `/login`, `/google` | none |
-| `POST /api/auth/send-email-otp`, `/verify-email-otp` | none |
+| `POST /api/auth/register` (email + password only), `/login`, `/google` | none |
+| `POST /api/auth/verify-email-otp`, `/resend-email-otp` | none |
 | `POST /api/auth/refresh`, `/logout` | refresh cookie |
 | `GET /api/auth/me` | access token |
-| `PUT /api/auth/profile` | access token |
+| `POST /api/user/upload-file` (multipart `file`; PDF or image) | access token |
+| `PUT /api/user/profile` (onboarding: academic fields + `verification_doc`) | access token |
+| `GET /api/client/events` | none |
+| `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
+| `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
+| `GET /uploads/*` (event images) | none |
+| `GET /uploads/users/{userID}/{name}` (KYC files) | access token; owner or admin only |
 
 ## Conventions that matter
 
@@ -78,9 +87,19 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   `/send-email-otp` re-issues a code and always answers with the same generic
   message so it can't enumerate accounts. Google sign-in skips all of this —
   Google has already confirmed the address.
+- **Student verification (KYC).** `users.verification_status` moves
+  `unverified → pending → verified | rejected` (rejected users may resubmit).
+  `POST /api/user/upload-file` stores a PDF/image under `uploads/users/<userID>/`
+  and returns its URL; `PUT /api/user/profile` saves the academic fields plus that
+  `verification_doc` (required) and an optional `profile_picture`, flipping the
+  status to `pending`. Admins review via `GET /api/admin/users?status=pending` and
+  decide with `PUT /api/admin/users/{id}/verify` (`{"status":"verified"|"rejected"}`).
+  KYC files are identity documents: `/uploads/users/*` is served only to the owning
+  user or an admin (Bearer token), while event images under `/uploads/*` stay public.
 - **Profile completeness.** `middleware.RequireCompleteProfile` gates future
-  non-auth routes on verified email and full name/institution/level/medium.
-  Deliberately not applied to `/api/auth/*` so users can finish onboarding.
+  non-auth routes on verified email, `verification_status = verified`, and full
+  name/institution/level/medium. Deliberately not applied to `/api/auth/*` or
+  `/api/user/*` so users can finish onboarding.
 - **Migrations.** Add a numbered pair `NNNN_name.up.sql` / `.down.sql` under
   `internal/platform/db/migrations/`. They're `//go:embed`-ed and applied in
   filename order by a homegrown runner tracking `schema_migrations`; there is no

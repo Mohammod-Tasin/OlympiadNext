@@ -82,8 +82,9 @@ func NewService(
 
 // Register creates an email/password account in an unverified state and
 // emails it a one-time code. It does not start a session: the caller must
-// verify their email (VerifyEmailOTP) and then log in.
-func (s *Service) Register(ctx context.Context, rawEmail, password, fullName, institutionName, level, medium string) error {
+// verify their email (VerifyEmailOTP) and then log in. Academic details
+// and the KYC document are collected later, at the onboarding submission.
+func (s *Service) Register(ctx context.Context, rawEmail, password string) error {
 	if err := email.ValidateEmail(rawEmail); err != nil {
 		return err
 	}
@@ -97,14 +98,10 @@ func (s *Service) Register(ctx context.Context, rawEmail, password, fullName, in
 	}
 
 	u := &user.User{
-		Email:           rawEmail,
-		FullName:        &fullName,
-		PasswordHash:    &passwordHash,
-		AuthProvider:    user.ProviderLocal,
-		EmailVerified:   false,
-		InstitutionName: &institutionName,
-		Level:           &level,
-		Medium:          &medium,
+		Email:         rawEmail,
+		PasswordHash:  &passwordHash,
+		AuthProvider:  user.ProviderLocal,
+		EmailVerified: false,
 	}
 	if err := s.users.Create(ctx, u); err != nil {
 		return err

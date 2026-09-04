@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,15 +20,6 @@ import (
 // maxUploadBytes caps the entire upload request body at 100 MB, so
 // high-resolution event images are accepted.
 const maxUploadBytes = 100 << 20
-
-// allowedImageExts is the set of extensions the upload endpoint accepts.
-var allowedImageExts = map[string]bool{
-	".jpg":  true,
-	".jpeg": true,
-	".png":  true,
-	".webp": true,
-	".gif":  true,
-}
 
 type EventHandler struct {
 	events  *events.Service
@@ -110,16 +100,11 @@ func (h *EventHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	if !allowedImageExts[strings.ToLower(filepath.Ext(header.Filename))] {
-		response.Error(w, http.StatusBadRequest, "unsupported file type; allowed: jpg, jpeg, png, webp, gif")
-		return
-	}
-
-	// Sniff the actual bytes so a renamed non-image is rejected too.
+	// Sniff the leading bytes so a renamed non-image is rejected too.
 	sniff := make([]byte, 512)
 	n, _ := io.ReadFull(file, sniff)
-	if !strings.HasPrefix(http.DetectContentType(sniff[:n]), "image/") {
-		response.Error(w, http.StatusBadRequest, "uploaded file is not a valid image")
+	if err := storage.ValidateImage(header.Filename, sniff[:n]); err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -128,7 +113,8 @@ func (h *EventHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url, err := h.storage.Save(header.Filename, file)
+	// Event images sit at the uploads root (subdir ""); they are public.
+	url, err := h.storage.Save("", header.Filename, file)
 	if err != nil {
 		h.log.Error("event image upload: save failed", "error", err)
 		response.Error(w, http.StatusInternalServerError, "could not save file")
