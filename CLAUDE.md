@@ -103,6 +103,11 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   decide with `PUT /api/admin/users/{id}/verify` (`{"status":"verified"|"rejected"}`).
   KYC files are identity documents: `/uploads/users/*` is served only to the owning
   user or an admin (Bearer token), while event images under `/uploads/*` stay public.
+  `ServeUserFile` validates the token and enforces owner-or-admin itself instead of
+  using `RequireAccessToken` — a browser can't put `X-Device-Fingerprint` on an
+  `<img>`/download request, so the single-device gate would 401 every document view.
+  It answers 401 only for a missing/invalid token and 403 for a valid token that is
+  neither the owner nor an admin.
 - **Profile completeness.** `middleware.RequireCompleteProfile` gates future
   non-auth routes on verified email, `verification_status = verified`, and full
   name/institution/level/medium. Deliberately not applied to `/api/auth/*` or

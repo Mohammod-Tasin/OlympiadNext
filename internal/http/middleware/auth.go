@@ -23,7 +23,7 @@ const accessClaimsKey contextKey = "access_claims"
 func RequireAccessToken(manager *jwt.Manager, users user.Repository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw := extractBearerToken(r.Header.Get("Authorization"))
+			raw := ExtractBearerToken(r.Header.Get("Authorization"))
 			if raw == "" {
 				response.Error(w, http.StatusUnauthorized, "missing bearer token")
 				return
@@ -58,7 +58,9 @@ func AccessClaimsFromContext(ctx context.Context) (*jwt.AccessClaims, bool) {
 	return claims, ok
 }
 
-func extractBearerToken(header string) string {
+// ExtractBearerToken pulls the raw token out of an "Authorization: Bearer
+// <token>" header, returning "" when the header is absent or malformed.
+func ExtractBearerToken(header string) string {
 	const prefix = "Bearer "
 	if !strings.HasPrefix(header, prefix) {
 		return ""
