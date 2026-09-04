@@ -140,27 +140,35 @@ func (r *UserRepository) MarkEmailVerified(ctx context.Context, userID string) e
 	return checkRowsAffected(res)
 }
 
-// SubmitOnboardingProfile writes the academic fields and KYC file
-// references and always moves the account to 'pending': any resubmission
-// (including after a rejection or even after a prior approval) goes back
-// through review. A nil ProfilePicture leaves the existing one untouched.
-func (r *UserRepository) SubmitOnboardingProfile(ctx context.Context, userID string, p user.OnboardingProfile) error {
+// SubmitOnboardingProfile writes the profile fields and returns the
+// account's resulting verification status. It backs both first-time
+// onboarding and later profile edits: a non-empty p.VerificationDoc
+// replaces the stored document and moves the account to 'pending', while
+// an empty one retains the existing document and status so an already
+// verified user can edit their name without re-entering review. A nil
+// ProfilePicture leaves the existing one untouched.
+func (r *UserRepository) SubmitOnboardingProfile(ctx context.Context, userID string, p user.OnboardingProfile) (user.VerificationStatus, error) {
 	const q = `
 		UPDATE users
 		SET full_name = $1,
 		    institution_name = $2,
 		    level = $3,
 		    medium = $4,
-		    verification_doc = $5,
-		    profile_picture = COALESCE($6, profile_picture),
-		    verification_status = 'pending',
+		    profile_picture = COALESCE($5, profile_picture),
+		    verification_doc = CASE WHEN $6 <> '' THEN $6 ELSE verification_doc END,
+		    verification_status = CASE WHEN $6 <> '' THEN 'pending' ELSE verification_status END,
 		    updated_at = now()
-		WHERE id = $7`
-	res, err := r.db.ExecContext(ctx, q, p.FullName, p.InstitutionName, p.Level, p.Medium, p.VerificationDoc, p.ProfilePicture, userID)
-	if err != nil {
-		return fmt.Errorf("user_repository: submit onboarding profile failed: %w", err)
+		WHERE id = $7
+		RETURNING verification_status`
+	var status user.VerificationStatus
+	err := r.db.QueryRowContext(ctx, q, p.FullName, p.InstitutionName, p.Level, p.Medium, p.ProfilePicture, p.VerificationDoc, userID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", user.ErrNotFound
 	}
-	return checkRowsAffected(res)
+	if err != nil {
+		return "", fmt.Errorf("user_repository: submit onboarding profile failed: %w", err)
+	}
+	return status, nil
 }
 
 // ListUsers returns users newest-first. status "" returns every user;

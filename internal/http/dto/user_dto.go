@@ -6,14 +6,16 @@ type UploadFileResponse struct {
 	URL string `json:"url"`
 }
 
-// SubmitProfileRequest is the onboarding submission: academic details plus
-// the uploaded KYC file references. verification_doc is required; a
-// successful submission moves the account to 'pending' review.
+// SubmitProfileRequest backs PUT /api/user/profile for both first-time
+// onboarding and later profile edits: academic details plus optional KYC
+// file references. verification_doc is optional — omit it to keep the
+// document (and verification status) already on file; sending a new one
+// moves the account back to 'pending' review.
 type SubmitProfileRequest struct {
 	FullName        string `json:"full_name"`
 	InstitutionName string `json:"institution_name"`
 	Level           string `json:"level"`
 	Medium          string `json:"medium"`
-	VerificationDoc string `json:"verification_doc"`
+	VerificationDoc string `json:"verification_doc,omitempty"`
 	ProfilePicture  string `json:"profile_picture,omitempty"`
 }
