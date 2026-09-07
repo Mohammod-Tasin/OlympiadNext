@@ -25,9 +25,9 @@ func (m PaymentMethod) Valid() bool {
 
 // Status tracks where a registration sits in the manual review:
 // 'pending' until an admin checks the payment, then 'approved' or
-// 'rejected'. Unlike KYC there is no resubmission — the UNIQUE constraints
-// on transaction_id and (user_id, event_id) make a rejected registration
-// terminal for that student/exam.
+// 'rejected'. A rejected registration can be returned to pending by an
+// admin correction, while the UNIQUE constraints still prevent a second
+// submission for the same transaction or student/event.
 type Status string
 
 const (
@@ -44,6 +44,13 @@ func (s Status) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// CanUnreject reports whether this status can enter the narrow admin
+// correction path back to pending. It is intentionally not a general
+// transition rule: only a rejected registration can be unrejected.
+func (s Status) CanUnreject() bool {
+	return s == StatusRejected
 }
 
 // Registration is a single student's payment submission for one event.
@@ -93,4 +100,8 @@ type Repository interface {
 	// Returns ErrNotFound for an unknown id and ErrAlreadyReviewed when the
 	// row is no longer pending.
 	Review(ctx context.Context, id, reviewedBy string, status Status) error
+	// Unreject returns a rejected registration to pending, clearing its
+	// review metadata in the same guarded UPDATE. It returns
+	// ErrInvalidUnrejectTransition unless the row is currently rejected.
+	Unreject(ctx context.Context, id string) error
 }

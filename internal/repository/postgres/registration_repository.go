@@ -155,6 +155,32 @@ func (r *RegistrationRepository) Review(ctx context.Context, id, reviewedBy stri
 	return nil
 }
 
+// Unreject is deliberately a separate, tightly scoped correction from
+// Review. Its WHERE clause is the concurrency-safe transition guard, and it
+// clears both review fields because the row is once again awaiting review.
+func (r *RegistrationRepository) Unreject(ctx context.Context, id string) error {
+	const q = `
+		UPDATE exam_registrations
+		SET status = 'pending', reviewed_by = NULL, reviewed_at = NULL, updated_at = now()
+		WHERE id = $1 AND status = 'rejected'`
+
+	res, err := r.db.ExecContext(ctx, q, id)
+	if err != nil {
+		return fmt.Errorf("registration_repository: unreject failed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("registration_repository: unreject rows affected failed: %w", err)
+	}
+	if n == 0 {
+		if _, findErr := r.FindByID(ctx, id); errors.Is(findErr, registration.ErrNotFound) {
+			return registration.ErrNotFound
+		}
+		return registration.ErrInvalidUnrejectTransition
+	}
+	return nil
+}
+
 func scanRegistrationInto(s rowScanner, reg *registration.Registration) error {
 	err := s.Scan(
 		&reg.ID, &reg.UserID, &reg.EventID, &reg.PaymentMethod, &reg.SenderNumber,

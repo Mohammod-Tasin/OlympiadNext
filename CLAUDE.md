@@ -71,7 +71,7 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`) | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
-| `GET /api/admin/registrations?status=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`) | access token + admin |
+| `GET /api/admin/registrations?status=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
 | `GET /uploads/*` (event images) | none |
 | `GET /uploads/users/{userID}/{name}` (KYC files) | access token; owner or admin only |
 
@@ -111,9 +111,11 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   `POST /api/user/registrations`. `exam_registrations.status` moves
   `pending → approved | rejected`; an admin decides via
   `PUT /api/admin/registrations/{id}/review`, which stamps `reviewed_by`
-  (the authenticated admin) and `reviewed_at`. Two UNIQUE constraints make
-  fraud/dupes hard and are deliberately terminal — there is **no**
-  resubmission: `uq_exam_reg_transaction_id` (a TrxID backs one
+  (the authenticated admin) and `reviewed_at`. A narrowly scoped admin
+  correction, `PUT /api/admin/registrations/{id}/unreject`, permits only
+  `rejected → pending` and clears those review fields; it logs the admin and
+  registration IDs. Two UNIQUE constraints make fraud/dupes hard — there is
+  still **no** second submission: `uq_exam_reg_transaction_id` (a TrxID backs one
   registration ever, by anyone) and `uq_exam_reg_user_event` (one
   registration per student per exam). The repo maps each violation to its
   own sentinel (`ErrDuplicateTransactionID` / `ErrAlreadyRegistered` →

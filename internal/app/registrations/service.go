@@ -138,6 +138,28 @@ func (s *Service) Review(ctx context.Context, id, adminID string, decision regis
 	return nil
 }
 
+// Unreject is the narrow admin correction path for a mistaken rejection.
+// It permits only rejected -> pending and intentionally does not allow an
+// approved or already-pending registration to be edited this way.
+func (s *Service) Unreject(ctx context.Context, id, adminID string) error {
+	reg, err := s.registrations.FindByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !reg.Status.CanUnreject() {
+		return registration.ErrInvalidUnrejectTransition
+	}
+
+	// The repository repeats the status predicate in SQL, so a concurrent
+	// review cannot turn this read-then-write check into a broader transition.
+	if err := s.registrations.Unreject(ctx, id); err != nil {
+		return err
+	}
+
+	s.log.Info("exam registration unrejected", "admin_id", adminID, "registration_id", id, "from_status", registration.StatusRejected, "to_status", registration.StatusPending)
+	return nil
+}
+
 // normalizeSenderNumber accepts a Bangladeshi mobile number written as
 // 01XXXXXXXXX, +8801XXXXXXXXX or 8801XXXXXXXXX (with or without spaces and
 // dashes) and returns it in the canonical 01XXXXXXXXX form. ok is false

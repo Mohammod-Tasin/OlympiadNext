@@ -123,6 +123,7 @@ func NewRouter(
 		// above: list by ?status=pending, then approve/reject each.
 		r.Get("/registrations", registrationHandler.ListForReview)
 		r.Put("/registrations/{id}/review", registrationHandler.Review)
+		r.Put("/registrations/{id}/unreject", registrationHandler.Unreject)
 	})
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
