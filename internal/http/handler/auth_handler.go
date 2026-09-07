@@ -20,6 +20,10 @@ type AuthHandler struct {
 	authService *auth.Service
 	users       user.Repository
 	cookies     cookieConfig
+	// adminScoped switches Login to authService.AdminLogin (which also
+	// requires the admin role). It is set only on the handler mounted at
+	// /api/auth/admin; the student handler leaves it false.
+	adminScoped bool
 	log         *slog.Logger
 }
 
@@ -27,7 +31,24 @@ func NewAuthHandler(authService *auth.Service, users user.Repository, cookieDoma
 	return &AuthHandler{
 		authService: authService,
 		users:       users,
-		cookies:     newCookieConfig(cookieDomain, cookieSecure, cookieSameSite),
+		cookies:     newCookieConfig(studentRefreshCookieName, studentRefreshCookiePath, cookieDomain, cookieSecure, cookieSameSite),
+		log:         log,
+	}
+}
+
+// NewAdminAuthHandler builds the auth handler mounted at /api/auth/admin.
+// It shares all of AuthHandler's logic with the student handler, differing
+// only in that it (a) reads and writes a distinct refresh cookie
+// (admin_refresh_token, path /api/auth/admin) so an admin session and a
+// student session can coexist in one browser, and (b) routes Login through
+// authService.AdminLogin, which rejects a non-admin account with 403
+// before any token pair is issued.
+func NewAdminAuthHandler(authService *auth.Service, users user.Repository, cookieDomain string, cookieSecure bool, cookieSameSite string, log *slog.Logger) *AuthHandler {
+	return &AuthHandler{
+		authService: authService,
+		users:       users,
+		cookies:     newCookieConfig(adminRefreshCookieName, adminRefreshCookiePath, cookieDomain, cookieSecure, cookieSameSite),
+		adminScoped: true,
 		log:         log,
 	}
 }
@@ -53,7 +74,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pair, err := h.authService.Login(r.Context(), req.Email, req.Password, req.DeviceFingerprint)
+	login := h.authService.Login
+	if h.adminScoped {
+		login = h.authService.AdminLogin
+	}
+	pair, err := login(r.Context(), req.Email, req.Password, req.DeviceFingerprint)
 	if err != nil {
 		h.handleAuthError(w, err)
 		return
@@ -80,7 +105,7 @@ func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(RefreshCookieName)
+	cookie, err := r.Cookie(h.cookies.Name)
 	if err != nil || cookie.Value == "" {
 		response.Error(w, http.StatusUnauthorized, "missing refresh token")
 		return
@@ -96,7 +121,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(RefreshCookieName); err == nil && cookie.Value != "" {
+	if cookie, err := r.Cookie(h.cookies.Name); err == nil && cookie.Value != "" {
 		if err := h.authService.Logout(r.Context(), cookie.Value); err != nil {
 			h.log.Error("logout: revoke failed", "error", err)
 		}
@@ -200,7 +225,8 @@ func (h *AuthHandler) handleAuthError(w http.ResponseWriter, err error) {
 		errors.Is(err, auth.ErrGoogleOnlyAccount),
 		errors.Is(err, auth.ErrSessionExpired):
 		response.Error(w, http.StatusUnauthorized, err.Error())
-	case errors.Is(err, auth.ErrEmailNotVerified):
+	case errors.Is(err, auth.ErrEmailNotVerified),
+		errors.Is(err, auth.ErrAdminAccessRequired):
 		response.Error(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, auth.ErrInvalidOTP):
 		response.Error(w, http.StatusBadRequest, err.Error())

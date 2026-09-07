@@ -65,6 +65,7 @@ func main() {
 
 	authService := auth.NewService(userRepo, refreshTokenRepo, deviceRepo, emailSender, jwtManager, googleVerifier, log)
 	authHandler := handler.NewAuthHandler(authService, userRepo, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
+	adminAuthHandler := handler.NewAdminAuthHandler(authService, userRepo, cfg.CookieDomain, cfg.CookieSecure, cfg.CookieSameSite, log)
 
 	fileStorage, err := storage.NewLocalStorage(uploadsDir)
 	if err != nil {
@@ -78,7 +79,7 @@ func main() {
 	eventService := events.NewService(eventRepo, log)
 	eventHandler := handler.NewEventHandler(eventService, fileStorage, log)
 
-	router := server.NewRouter(authHandler, userHandler, adminHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
+	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + cfg.Port,

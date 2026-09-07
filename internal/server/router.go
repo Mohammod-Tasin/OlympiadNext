@@ -16,6 +16,7 @@ import (
 
 func NewRouter(
 	authHandler *handler.AuthHandler,
+	adminAuthHandler *handler.AuthHandler,
 	userHandler *handler.UserHandler,
 	adminHandler *handler.AdminHandler,
 	eventHandler *handler.EventHandler,
@@ -60,6 +61,21 @@ func NewRouter(
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAccessToken(jwtManager, users))
 			r.Get("/me", authHandler.Me)
+		})
+
+		// Admin console auth, parallel to the student routes above and
+		// running the same service logic. Two things differ: these routes
+		// set/read a distinct refresh cookie (admin_refresh_token, scoped to
+		// path /api/auth/admin) so an admin and a student can be signed in
+		// at once in one browser without one login evicting the other, and
+		// login requires the admin role (403 otherwise, no token issued).
+		// They inherit this block's per-IP rate limit and CORS, and carry
+		// the same RequireTrustedOrigin guard as every other mutating
+		// /api/auth route.
+		r.Route("/admin", func(r chi.Router) {
+			r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/login", adminAuthHandler.Login)
+			r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/refresh", adminAuthHandler.Refresh)
+			r.With(appmw.RequireTrustedOrigin(allowedOrigins)).Post("/logout", adminAuthHandler.Logout)
 		})
 	})
 

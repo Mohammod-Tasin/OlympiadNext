@@ -191,6 +191,107 @@ func TestLogin_DuplicateTokenHash_IsIdempotentSuccess(t *testing.T) {
 	}
 }
 
+// adminLoginFixture builds a Service whose only wired dependency is a user
+// repo returning the given account, plus a token repo that records how
+// many refresh rows were inserted. It lets the admin-login tests assert
+// both the returned error and whether a session was actually minted.
+func adminLoginFixture(t *testing.T, u *user.User) (*Service, *int32) {
+	t.Helper()
+	mgr := jwt.NewManager("access-secret", "refresh-secret", 15*time.Minute, 720*time.Hour)
+	users := fakeUserRepo{findByEmail: func(_ context.Context, _ string) (*user.User, error) {
+		return u, nil
+	}}
+	var inserts int32
+	tokens := fakeTokenRepo{create: func(_ context.Context, tok *token.RefreshToken) error {
+		atomic.AddInt32(&inserts, 1)
+		tok.ID = "new-1"
+		return nil
+	}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return NewService(users, tokens, nil, nil, mgr, nil, log), &inserts
+}
+
+func verifiedUser(t *testing.T, role user.Role) *user.User {
+	t.Helper()
+	pwHash, err := email.HashPassword("Sup3rSecret!pass")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	return &user.User{
+		ID:            "user-1",
+		Email:         "u@example.com",
+		PasswordHash:  &pwHash,
+		AuthProvider:  user.ProviderLocal,
+		EmailVerified: true,
+		Role:          role,
+	}
+}
+
+// TestAdminLogin_NonAdmin_RejectedBeforeTokenIssued is the security half
+// of the admin-cookie change: a correct student credential presented to
+// the admin login path must come back as ErrAdminAccessRequired (HTTP
+// 403) and must not mint or persist any refresh token.
+func TestAdminLogin_NonAdmin_RejectedBeforeTokenIssued(t *testing.T) {
+	svc, inserts := adminLoginFixture(t, verifiedUser(t, user.RoleStudent))
+
+	pair, err := svc.AdminLogin(context.Background(), "u@example.com", "Sup3rSecret!pass", "")
+	if !errors.Is(err, ErrAdminAccessRequired) {
+		t.Fatalf("want ErrAdminAccessRequired (HTTP 403), got %v", err)
+	}
+	if pair != nil {
+		t.Fatalf("a non-admin must not receive a token pair, got %+v", pair)
+	}
+	if n := atomic.LoadInt32(inserts); n != 0 {
+		t.Fatalf("a non-admin must not have a refresh token persisted, got %d inserts", n)
+	}
+}
+
+// TestAdminLogin_Admin_IssuesSession confirms the admin path is otherwise
+// identical to Login for a legitimate admin account.
+func TestAdminLogin_Admin_IssuesSession(t *testing.T) {
+	svc, inserts := adminLoginFixture(t, verifiedUser(t, user.RoleAdmin))
+
+	pair, err := svc.AdminLogin(context.Background(), "u@example.com", "Sup3rSecret!pass", "")
+	if err != nil {
+		t.Fatalf("admin login failed: %v", err)
+	}
+	if pair == nil || pair.AccessToken == "" || pair.RefreshToken == "" {
+		t.Fatalf("expected a fully populated token pair, got %+v", pair)
+	}
+	if n := atomic.LoadInt32(inserts); n != 1 {
+		t.Fatalf("expected exactly one refresh-token insert, got %d", n)
+	}
+}
+
+// TestAdminLogin_WrongPassword_LooksLikeAnyBadCredential makes sure the
+// role gate does not run before the password check — a bad password on
+// the admin path is still ErrInvalidCredentials, not a role error.
+func TestAdminLogin_WrongPassword_LooksLikeAnyBadCredential(t *testing.T) {
+	svc, _ := adminLoginFixture(t, verifiedUser(t, user.RoleStudent))
+
+	_, err := svc.AdminLogin(context.Background(), "u@example.com", "wrong-password", "")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("want ErrInvalidCredentials, got %v", err)
+	}
+}
+
+// TestLogin_NonAdmin_Unchanged pins that the ordinary student login path
+// is unaffected by the admin gate.
+func TestLogin_NonAdmin_Unchanged(t *testing.T) {
+	svc, inserts := adminLoginFixture(t, verifiedUser(t, user.RoleStudent))
+
+	pair, err := svc.Login(context.Background(), "u@example.com", "Sup3rSecret!pass", "")
+	if err != nil {
+		t.Fatalf("student login failed: %v", err)
+	}
+	if pair == nil || pair.AccessToken == "" {
+		t.Fatalf("expected a token pair, got %+v", pair)
+	}
+	if n := atomic.LoadInt32(inserts); n != 1 {
+		t.Fatalf("expected exactly one refresh-token insert, got %d", n)
+	}
+}
+
 // TestRefresh_ConcurrentRotation_NeverErrors500 models several browser
 // tabs refreshing the same cookie at once. The DB's unique index lets at
 // most one rotation persist; every other concurrent caller must come back
