@@ -171,6 +171,33 @@ func (h *RegistrationHandler) Review(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Unreject handles PUT /api/admin/registrations/{id}/unreject. It has no
+// request body: this is a fixed rejected -> pending correction, not a
+// general status editor. The service also clears reviewed_by/reviewed_at.
+func (h *RegistrationHandler) Unreject(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		response.Error(w, http.StatusBadRequest, "registration id is required")
+		return
+	}
+
+	if err := h.registrations.Unreject(r.Context(), id, claims.UserID); err != nil {
+		h.handleError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{
+		"id":     id,
+		"status": string(registration.StatusPending),
+	})
+}
+
 func (h *RegistrationHandler) handleError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, registrations.ErrValidation):
@@ -187,6 +214,8 @@ func (h *RegistrationHandler) handleError(w http.ResponseWriter, err error) {
 		response.Error(w, http.StatusNotFound, "registration not found")
 	case errors.Is(err, registration.ErrAlreadyReviewed):
 		response.Error(w, http.StatusConflict, "this registration has already been reviewed")
+	case errors.Is(err, registration.ErrInvalidUnrejectTransition):
+		response.Error(w, http.StatusConflict, "only a rejected registration can be returned to pending")
 	default:
 		h.log.Error("registration handler: unexpected error", "error", err)
 		response.Error(w, http.StatusInternalServerError, "internal server error")

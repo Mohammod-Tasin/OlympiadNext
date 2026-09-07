@@ -16,11 +16,21 @@ import (
 
 type fakeRegistrationRepo struct {
 	registration.Repository
-	create func(ctx context.Context, r *registration.Registration) error
+	create   func(ctx context.Context, r *registration.Registration) error
+	findByID func(ctx context.Context, id string) (*registration.Registration, error)
+	unreject func(ctx context.Context, id string) error
 }
 
 func (f fakeRegistrationRepo) Create(ctx context.Context, r *registration.Registration) error {
 	return f.create(ctx, r)
+}
+
+func (f fakeRegistrationRepo) FindByID(ctx context.Context, id string) (*registration.Registration, error) {
+	return f.findByID(ctx, id)
+}
+
+func (f fakeRegistrationRepo) Unreject(ctx context.Context, id string) error {
+	return f.unreject(ctx, id)
 }
 
 type fakeEventRepo struct {
@@ -170,5 +180,45 @@ func TestReview_RejectsNonDecisionStatus(t *testing.T) {
 	svc := newService(fakeRegistrationRepo{}, fakeEventRepo{})
 	if err := svc.Review(context.Background(), "reg-1", "admin-1", registration.StatusPending); !errors.Is(err, ErrValidation) {
 		t.Fatalf("want ErrValidation for a non-decision status, got %v", err)
+	}
+}
+
+func TestUnreject_OnlyAllowsRejectedToPending(t *testing.T) {
+	cases := []struct {
+		name      string
+		from      registration.Status
+		wantErr   error
+		wantWrite bool
+	}{
+		{name: "rejected", from: registration.StatusRejected, wantWrite: true},
+		{name: "pending", from: registration.StatusPending, wantErr: registration.ErrInvalidUnrejectTransition},
+		{name: "approved", from: registration.StatusApproved, wantErr: registration.ErrInvalidUnrejectTransition},
+		{name: "unknown", from: registration.Status("unknown"), wantErr: registration.ErrInvalidUnrejectTransition},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wrote := false
+			svc := newService(
+				fakeRegistrationRepo{
+					findByID: func(_ context.Context, _ string) (*registration.Registration, error) {
+						return &registration.Registration{ID: "reg-1", Status: tc.from}, nil
+					},
+					unreject: func(_ context.Context, _ string) error {
+						wrote = true
+						return nil
+					},
+				},
+				fakeEventRepo{},
+			)
+
+			err := svc.Unreject(context.Background(), "reg-1", "admin-1")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("want error %v, got %v", tc.wantErr, err)
+			}
+			if wrote != tc.wantWrite {
+				t.Errorf("repository write called = %v, want %v", wrote, tc.wantWrite)
+			}
+		})
 	}
 }
