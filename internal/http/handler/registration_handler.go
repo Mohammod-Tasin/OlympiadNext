@@ -100,7 +100,7 @@ func (h *RegistrationHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListForReview handles GET /api/admin/registrations, optionally filtered
-// by ?status=pending for the review queue. Admin-gated by middleware.
+// by ?status=pending and/or ?event_id=<event UUID>. Admin-gated by middleware.
 func (h *RegistrationHandler) ListForReview(w http.ResponseWriter, r *http.Request) {
 	var status registration.Status
 	if raw := strings.TrimSpace(r.URL.Query().Get("status")); raw != "" {
@@ -111,7 +111,8 @@ func (h *RegistrationHandler) ListForReview(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	details, err := h.registrations.ListForReview(r.Context(), status, maxRegistrationListLimit)
+	eventID := strings.TrimSpace(r.URL.Query().Get("event_id"))
+	details, err := h.registrations.ListForReview(r.Context(), status, eventID, maxRegistrationListLimit)
 	if err != nil {
 		h.log.Error("admin list registrations failed", "error", err)
 		response.Error(w, http.StatusInternalServerError, "internal server error")

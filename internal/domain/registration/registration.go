@@ -93,8 +93,9 @@ type Repository interface {
 	// each with its EventTitle populated.
 	ListByUser(ctx context.Context, userID string) ([]*Detail, error)
 	// ListByStatus returns the review queue, newest first, each row joined
-	// with the student's name/email and the event title. limit caps it.
-	ListByStatus(ctx context.Context, status Status, limit int) ([]*Detail, error)
+	// with the student's name/email and the event title. Empty status and
+	// eventID values leave their respective filters off; limit caps it.
+	ListByStatus(ctx context.Context, status Status, eventID string, limit int) ([]*Detail, error)
 	// Review records an admin's decision: it sets status, reviewed_by and
 	// reviewed_at in one UPDATE. status must be approved or rejected.
 	// Returns ErrNotFound for an unknown id and ErrAlreadyReviewed when the
