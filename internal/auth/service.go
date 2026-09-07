@@ -24,11 +24,12 @@ import (
 )
 
 var (
-	ErrInvalidCredentials = errors.New("auth: invalid email or password")
-	ErrGoogleOnlyAccount  = errors.New("auth: account uses Google sign-in, no password set")
-	ErrEmailNotVerified   = errors.New("auth: email address not verified")
-	ErrSessionExpired     = errors.New("auth: session expired or revoked")
-	ErrInvalidOTP         = errors.New("auth: invalid or expired code")
+	ErrInvalidCredentials  = errors.New("auth: invalid email or password")
+	ErrGoogleOnlyAccount   = errors.New("auth: account uses Google sign-in, no password set")
+	ErrEmailNotVerified    = errors.New("auth: email address not verified")
+	ErrSessionExpired      = errors.New("auth: session expired or revoked")
+	ErrInvalidOTP          = errors.New("auth: invalid or expired code")
+	ErrAdminAccessRequired = errors.New("auth: admin access required")
 )
 
 // otpTTL is how long a generated email OTP remains valid.
@@ -112,6 +113,40 @@ func (s *Service) Register(ctx context.Context, rawEmail, password string) error
 }
 
 func (s *Service) Login(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
+	u, err := s.authenticatePassword(ctx, rawEmail, password)
+	if err != nil {
+		return nil, err
+	}
+
+	s.log.Info("user logged in", "user_id", u.ID, "provider", "local")
+	return s.issueSessionAfterAuth(ctx, u, deviceFingerprint)
+}
+
+// AdminLogin authenticates an email/password pair exactly as Login does,
+// then additionally requires the account to hold the admin role. A
+// non-admin is rejected here — before any token pair is minted or
+// persisted — so a student credential can never be exchanged for a
+// working (even if later authz-gated) admin session. Backs the
+// /api/auth/admin/login route used by the admin console.
+func (s *Service) AdminLogin(ctx context.Context, rawEmail, password, deviceFingerprint string) (*TokenPair, error) {
+	u, err := s.authenticatePassword(ctx, rawEmail, password)
+	if err != nil {
+		return nil, err
+	}
+	if u.Role != user.RoleAdmin {
+		s.log.Warn("admin login rejected: account is not an admin", "user_id", u.ID)
+		return nil, ErrAdminAccessRequired
+	}
+
+	s.log.Info("admin logged in", "user_id", u.ID, "provider", "local")
+	return s.issueSessionAfterAuth(ctx, u, deviceFingerprint)
+}
+
+// authenticatePassword resolves an account by email and verifies its
+// password and email-verified state. It is the single shared credential
+// check behind both Login and AdminLogin so the two paths can never drift
+// apart on how a password is validated.
+func (s *Service) authenticatePassword(ctx context.Context, rawEmail, password string) (*user.User, error) {
 	u, err := s.users.FindByEmail(ctx, rawEmail)
 	if err != nil {
 		if errors.Is(err, user.ErrNotFound) {
@@ -129,9 +164,7 @@ func (s *Service) Login(ctx context.Context, rawEmail, password, deviceFingerpri
 	if !u.EmailVerified {
 		return nil, ErrEmailNotVerified
 	}
-
-	s.log.Info("user logged in", "user_id", u.ID, "provider", "local")
-	return s.issueSessionAfterAuth(ctx, u, deviceFingerprint)
+	return u, nil
 }
 
 // GoogleLogin verifies the ID token with Google, then either logs into

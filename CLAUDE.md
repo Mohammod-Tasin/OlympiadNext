@@ -60,8 +60,10 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `GET /`, `HEAD /`, `GET /healthz` | none (Render health checks) |
 | `POST /api/auth/register` (email + password only), `/login`, `/google` | none |
 | `POST /api/auth/verify-email-otp`, `/resend-email-otp` | none |
-| `POST /api/auth/refresh`, `/logout` | refresh cookie |
+| `POST /api/auth/refresh`, `/logout` | refresh cookie (`refresh_token`, path `/api/auth`) |
 | `GET /api/auth/me` | access token |
+| `POST /api/auth/admin/login` | none; rejects non-admin with 403 before issuing tokens |
+| `POST /api/auth/admin/refresh`, `/logout` | admin refresh cookie (`admin_refresh_token`, path `/api/auth/admin`) |
 | `POST /api/user/upload-file` (multipart `file`; PDF or image) | access token |
 | `PUT /api/user/profile` (onboarding + profile edits: academic fields, optional `verification_doc`) | access token |
 | `GET /api/client/events` | none |
@@ -75,6 +77,15 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 - **Tokens.** Access JWT goes in the JSON body, sent back as `Authorization: Bearer`.
   Refresh token is an HttpOnly cookie, rotated on every use, and stored server-side
   only as a SHA-256 hex digest (`hash.SHA256Hex`) — never in plaintext.
+- **Two refresh cookies.** The student site and the admin console are separate
+  Vercel origins hitting this one backend, so the browser keys the refresh cookie
+  only by (name, path) on the backend domain. `/api/auth/*` uses `refresh_token` at
+  path `/api/auth`; `/api/auth/admin/*` uses `admin_refresh_token` at path
+  `/api/auth/admin`. Both are served by the same `AuthHandler` type and the same
+  `auth.Service` — `handler.NewAdminAuthHandler` just swaps the `cookieConfig`
+  name/path and points `Login` at `authService.AdminLogin` (credential check +
+  `role == admin`, else `ErrAdminAccessRequired` → 403 with no token issued).
+  Keeps the two sessions independent in one browser.
 - **Single-device sessions.** Clients send `X-Device-Fingerprint`; `issueTokenPair`
   writes it to `users.active_device_fingerprint`, and `RequireAccessToken` rejects
   requests whose fingerprint doesn't match the active one. Logging in elsewhere
