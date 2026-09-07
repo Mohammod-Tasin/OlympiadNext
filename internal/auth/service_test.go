@@ -9,23 +9,29 @@ import (
 	"testing"
 	"time"
 
+	"olympiadnext/internal/auth/email"
 	"olympiadnext/internal/auth/jwt"
 	"olympiadnext/internal/domain/token"
 	"olympiadnext/internal/domain/user"
 )
 
-// The fakes below embed the domain interface, so any method the refresh
-// path does not use stays nil and panics loudly if it is ever called —
-// e.g. RevokeAllForUser, the token-theft response, must never run for a
-// benign rotation race.
+// The fakes below embed the domain interface, so any method a path does
+// not use stays nil and panics loudly if it is ever called — e.g.
+// RevokeAllForUser, the token-theft response, must never run for a benign
+// rotation race.
 
 type fakeUserRepo struct {
 	user.Repository
-	findByID func(ctx context.Context, id string) (*user.User, error)
+	findByID    func(ctx context.Context, id string) (*user.User, error)
+	findByEmail func(ctx context.Context, email string) (*user.User, error)
 }
 
 func (f fakeUserRepo) FindByID(ctx context.Context, id string) (*user.User, error) {
 	return f.findByID(ctx, id)
+}
+
+func (f fakeUserRepo) FindByEmail(ctx context.Context, e string) (*user.User, error) {
+	return f.findByEmail(ctx, e)
 }
 
 type fakeTokenRepo struct {
@@ -141,6 +147,47 @@ func TestRefresh_UnrelatedPersistenceError_StillPropagates(t *testing.T) {
 	}
 	if errors.Is(err, ErrSessionExpired) {
 		t.Fatalf("an unrelated DB error was wrongly masked as a 401")
+	}
+}
+
+// TestLogin_DuplicateTokenHash_IsIdempotentSuccess covers the same
+// collision on the login path: two near-simultaneous logins for one
+// account in the same second regenerate the identical deterministic
+// token, and the second Create loses the race. The user authenticated
+// correctly and the identical token is already persisted, so login must
+// return that pair — not a 500.
+func TestLogin_DuplicateTokenHash_IsIdempotentSuccess(t *testing.T) {
+	pwHash, err := email.HashPassword("Sup3rSecret!pass")
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	verified := &user.User{
+		ID:            "user-1",
+		Email:         "u@example.com",
+		PasswordHash:  &pwHash,
+		AuthProvider:  user.ProviderLocal,
+		EmailVerified: true,
+	}
+
+	mgr := jwt.NewManager("access-secret", "refresh-secret", 15*time.Minute, 720*time.Hour)
+	users := fakeUserRepo{findByEmail: func(_ context.Context, _ string) (*user.User, error) {
+		return verified, nil
+	}}
+	tokens := fakeTokenRepo{
+		create: func(_ context.Context, _ *token.RefreshToken) error {
+			return token.ErrDuplicateTokenHash // the racing login already stored it
+		},
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc := NewService(users, tokens, nil, nil, mgr, nil, log)
+
+	// Empty device fingerprint keeps the device-repo path out of this test.
+	pair, err := svc.Login(context.Background(), "u@example.com", "Sup3rSecret!pass", "")
+	if err != nil {
+		t.Fatalf("a same-second duplicate-token race on login must be idempotent success, got: %v", err)
+	}
+	if pair == nil || pair.AccessToken == "" || pair.RefreshToken == "" {
+		t.Fatalf("expected the (identical, already-persisted) token pair, got %+v", pair)
 	}
 }
 

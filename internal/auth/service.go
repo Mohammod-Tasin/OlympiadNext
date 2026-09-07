@@ -131,7 +131,7 @@ func (s *Service) Login(ctx context.Context, rawEmail, password, deviceFingerpri
 	}
 
 	s.log.Info("user logged in", "user_id", u.ID, "provider", "local")
-	return s.issueTokenPair(ctx, u, deviceFingerprint)
+	return s.issueSessionAfterAuth(ctx, u, deviceFingerprint)
 }
 
 // GoogleLogin verifies the ID token with Google, then either logs into
@@ -146,7 +146,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 
 	if u, err := s.users.FindByGoogleID(ctx, claims.Subject); err == nil {
 		s.log.Info("user logged in", "user_id", u.ID, "provider", "google")
-		return s.issueTokenPair(ctx, u, deviceFingerprint)
+		return s.issueSessionAfterAuth(ctx, u, deviceFingerprint)
 	} else if !errors.Is(err, user.ErrNotFound) {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 		existing.GoogleID = &claims.Subject
 		existing.EmailVerified = claims.EmailVerified
 		s.log.Info("google account linked to existing user", "user_id", existing.ID)
-		return s.issueTokenPair(ctx, existing, deviceFingerprint)
+		return s.issueSessionAfterAuth(ctx, existing, deviceFingerprint)
 
 	case errors.Is(err, user.ErrNotFound):
 		newUser := &user.User{
@@ -174,7 +174,7 @@ func (s *Service) GoogleLogin(ctx context.Context, rawIDToken, deviceFingerprint
 			return nil, err
 		}
 		s.log.Info("user registered", "user_id", newUser.ID, "provider", "google")
-		return s.issueTokenPair(ctx, newUser, deviceFingerprint)
+		return s.issueSessionAfterAuth(ctx, newUser, deviceFingerprint)
 
 	default:
 		return nil, err
@@ -223,12 +223,12 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 
 	pair, err := s.issueTokenPair(ctx, u, "")
 	if err != nil {
-		// Two concurrent refreshes for the same user within the same second
-		// mint an identical token (deterministic JWT, no nonce); the request
-		// that loses the race to persist it lands here. The presented token
-		// is already revoked, so this is a spent-token 401, not a
-		// persistence failure — and a benign race, not a theft signal, so it
-		// does NOT revoke the user's other sessions.
+		// The rotated token is deterministic (no nonce), so when this refresh
+		// lands in the same second the presented token was issued, the "new"
+		// token is byte-identical to the one just revoked and its insert
+		// collides. Unlike the login paths this cannot be handed back as
+		// success — that row is now revoked — so it is a spent-token 401.
+		// It is a benign race, not theft, so the user's other sessions stand.
 		if errors.Is(err, token.ErrDuplicateTokenHash) {
 			s.log.Info("refresh token rotation raced; treating as expired session", "user_id", stored.UserID)
 			return nil, ErrSessionExpired
@@ -338,12 +338,29 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 		return nil, err
 	}
 
-	if err := s.refreshTokens.Create(ctx, &token.RefreshToken{
+	pair := &TokenPair{
+		AccessToken:           accessToken,
+		AccessTokenExpiresAt:  time.Now().Add(s.jwtManager.AccessTokenTTL()),
+		RefreshToken:          refreshToken,
+		RefreshTokenExpiresAt: refreshExpiresAt,
+	}
+
+	// Access/refresh tokens are deterministic — user id plus second-
+	// granularity timestamps, no nonce — so two issuances for the same user
+	// in the same second are byte-identical. When a concurrent request has
+	// already persisted this exact token, Create reports
+	// ErrDuplicateTokenHash: the row is there and the JWTs we built are
+	// valid, so it is carried up as a signal rather than a hard failure. The
+	// login / sign-in paths treat it as idempotent success
+	// (issueSessionAfterAuth); Refresh rejects it, because there the
+	// colliding row is the one it just revoked.
+	dupErr := s.refreshTokens.Create(ctx, &token.RefreshToken{
 		UserID:    u.ID,
 		TokenHash: hash.SHA256Hex(refreshToken),
 		ExpiresAt: refreshExpiresAt,
-	}); err != nil {
-		return nil, fmt.Errorf("auth: persist refresh token failed: %w", err)
+	})
+	if dupErr != nil && !errors.Is(dupErr, token.ErrDuplicateTokenHash) {
+		return nil, fmt.Errorf("auth: persist refresh token failed: %w", dupErr)
 	}
 
 	if deviceFingerprint != "" {
@@ -353,12 +370,20 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 		go s.upsertDeviceAsync(u.ID, deviceFingerprint)
 	}
 
-	return &TokenPair{
-		AccessToken:           accessToken,
-		AccessTokenExpiresAt:  time.Now().Add(s.jwtManager.AccessTokenTTL()),
-		RefreshToken:          refreshToken,
-		RefreshTokenExpiresAt: refreshExpiresAt,
-	}, nil
+	return pair, dupErr // nil on the happy path; ErrDuplicateTokenHash on a benign same-second race
+}
+
+// issueSessionAfterAuth issues a token pair for a caller that has just
+// authenticated (password login or Google sign-in). A same-second
+// duplicate-token race for this user is idempotent success — the identical
+// token is already persisted and active — not an error to surface.
+func (s *Service) issueSessionAfterAuth(ctx context.Context, u *user.User, deviceFingerprint string) (*TokenPair, error) {
+	pair, err := s.issueTokenPair(ctx, u, deviceFingerprint)
+	if errors.Is(err, token.ErrDuplicateTokenHash) {
+		s.log.Info("auth: concurrent request issued the same session token for this user; reusing it", "user_id", u.ID)
+		return pair, nil
+	}
+	return pair, err
 }
 
 func generateOTPCode() (string, error) {
