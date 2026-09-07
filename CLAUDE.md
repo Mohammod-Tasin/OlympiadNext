@@ -71,7 +71,7 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`) | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
-| `GET /api/admin/registrations?status=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
+| `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
 | `GET /uploads/*` (event images) | none |
 | `GET /uploads/users/{userID}/{name}` (KYC files) | access token; owner or admin only |
 

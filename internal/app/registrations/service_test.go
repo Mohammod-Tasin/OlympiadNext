@@ -16,9 +16,10 @@ import (
 
 type fakeRegistrationRepo struct {
 	registration.Repository
-	create   func(ctx context.Context, r *registration.Registration) error
-	findByID func(ctx context.Context, id string) (*registration.Registration, error)
-	unreject func(ctx context.Context, id string) error
+	create       func(ctx context.Context, r *registration.Registration) error
+	findByID     func(ctx context.Context, id string) (*registration.Registration, error)
+	listByStatus func(ctx context.Context, status registration.Status, eventID string, limit int) ([]*registration.Detail, error)
+	unreject     func(ctx context.Context, id string) error
 }
 
 func (f fakeRegistrationRepo) Create(ctx context.Context, r *registration.Registration) error {
@@ -27,6 +28,10 @@ func (f fakeRegistrationRepo) Create(ctx context.Context, r *registration.Regist
 
 func (f fakeRegistrationRepo) FindByID(ctx context.Context, id string) (*registration.Registration, error) {
 	return f.findByID(ctx, id)
+}
+
+func (f fakeRegistrationRepo) ListByStatus(ctx context.Context, status registration.Status, eventID string, limit int) ([]*registration.Detail, error) {
+	return f.listByStatus(ctx, status, eventID, limit)
 }
 
 func (f fakeRegistrationRepo) Unreject(ctx context.Context, id string) error {
@@ -180,6 +185,56 @@ func TestReview_RejectsNonDecisionStatus(t *testing.T) {
 	svc := newService(fakeRegistrationRepo{}, fakeEventRepo{})
 	if err := svc.Review(context.Background(), "reg-1", "admin-1", registration.StatusPending); !errors.Is(err, ErrValidation) {
 		t.Fatalf("want ErrValidation for a non-decision status, got %v", err)
+	}
+}
+
+func TestListForReview_EventFilter(t *testing.T) {
+	var gotStatus registration.Status
+	var gotEventID string
+	var gotLimit int
+	svc := newService(
+		fakeRegistrationRepo{listByStatus: func(_ context.Context, status registration.Status, eventID string, limit int) ([]*registration.Detail, error) {
+			gotStatus, gotEventID, gotLimit = status, eventID, limit
+			return []*registration.Detail{{Registration: registration.Registration{ID: "reg-1"}}}, nil
+		}},
+		fakeEventRepo{findByID: func(_ context.Context, id string) (*event.Event, error) {
+			if id != "event-1" {
+				t.Fatalf("event lookup ID = %q, want event-1", id)
+			}
+			return activeEvent(), nil
+		}},
+	)
+
+	details, err := svc.ListForReview(context.Background(), registration.StatusPending, " event-1 ", 25)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(details) != 1 {
+		t.Fatalf("detail count = %d, want 1", len(details))
+	}
+	if gotStatus != registration.StatusPending || gotEventID != "event-1" || gotLimit != 25 {
+		t.Errorf("repository filters = (%q, %q, %d), want (pending, event-1, 25)", gotStatus, gotEventID, gotLimit)
+	}
+}
+
+func TestListForReview_UnknownEventReturnsNotFound(t *testing.T) {
+	listed := false
+	svc := newService(
+		fakeRegistrationRepo{listByStatus: func(_ context.Context, _ registration.Status, _ string, _ int) ([]*registration.Detail, error) {
+			listed = true
+			return nil, nil
+		}},
+		fakeEventRepo{findByID: func(_ context.Context, _ string) (*event.Event, error) {
+			return nil, event.ErrNotFound
+		}},
+	)
+
+	_, err := svc.ListForReview(context.Background(), "", "missing-event", 25)
+	if !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("want ErrEventNotFound, got %v", err)
+	}
+	if listed {
+		t.Error("registration repository must not be queried for an unknown event")
 	}
 }
 

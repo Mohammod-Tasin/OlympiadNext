@@ -118,10 +118,21 @@ func (s *Service) ListForUser(ctx context.Context, userID string) ([]*registrati
 	return s.registrations.ListByUser(ctx, userID)
 }
 
-// ListForReview returns the admin review queue. An empty status returns
-// every registration; otherwise only rows in that state. limit caps it.
-func (s *Service) ListForReview(ctx context.Context, status registration.Status, limit int) ([]*registration.Detail, error) {
-	return s.registrations.ListByStatus(ctx, status, limit)
+// ListForReview returns the admin review queue. Empty status and eventID
+// values omit their corresponding filters; limit caps the result. A supplied
+// eventID must refer to a real event so callers can distinguish an empty
+// review queue from a mistyped event ID.
+func (s *Service) ListForReview(ctx context.Context, status registration.Status, eventID string, limit int) ([]*registration.Detail, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID != "" {
+		if _, err := s.events.FindByID(ctx, eventID); err != nil {
+			if errors.Is(err, event.ErrNotFound) {
+				return nil, ErrEventNotFound
+			}
+			return nil, fmt.Errorf("registrations: load event for review filter failed: %w", err)
+		}
+	}
+	return s.registrations.ListByStatus(ctx, status, eventID, limit)
 }
 
 // Review records an admin's approve/reject decision. decision must be

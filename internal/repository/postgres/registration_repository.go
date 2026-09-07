@@ -90,7 +90,7 @@ func (r *RegistrationRepository) ListByUser(ctx context.Context, userID string) 
 	return out, nil
 }
 
-func (r *RegistrationRepository) ListByStatus(ctx context.Context, status registration.Status, limit int) ([]*registration.Detail, error) {
+func (r *RegistrationRepository) ListByStatus(ctx context.Context, status registration.Status, eventID string, limit int) ([]*registration.Detail, error) {
 	// The JOIN and projection are identical; only the status filter differs.
 	base := `
 		SELECT ` + registrationColumnsER + `, e.title, u.full_name, u.email
@@ -102,10 +102,15 @@ func (r *RegistrationRepository) ListByStatus(ctx context.Context, status regist
 		rows *sql.Rows
 		err  error
 	)
-	if status == "" {
+	switch {
+	case status == "" && eventID == "":
 		rows, err = r.db.QueryContext(ctx, base+` ORDER BY er.created_at DESC LIMIT $1`, limit)
-	} else {
+	case status != "" && eventID == "":
 		rows, err = r.db.QueryContext(ctx, base+` WHERE er.status = $1 ORDER BY er.created_at DESC LIMIT $2`, status, limit)
+	case status == "" && eventID != "":
+		rows, err = r.db.QueryContext(ctx, base+` WHERE er.event_id = $1 ORDER BY er.created_at DESC LIMIT $2`, eventID, limit)
+	default:
+		rows, err = r.db.QueryContext(ctx, base+` WHERE er.status = $1 AND er.event_id = $2 ORDER BY er.created_at DESC LIMIT $3`, status, eventID, limit)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("registration_repository: list by status failed: %w", err)
