@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/lib/pq"
+
 	"olympiadnext/internal/domain/token"
 )
 
@@ -24,6 +26,14 @@ func (r *RefreshTokenRepository) Create(ctx context.Context, t *token.RefreshTok
 		RETURNING id, created_at`
 	err := r.db.QueryRowContext(ctx, q, t.UserID, t.TokenHash, t.ExpiresAt).Scan(&t.ID, &t.CreatedAt)
 	if err != nil {
+		// A concurrent rotation for the same user in the same second mints a
+		// byte-identical token; the insert that lands second trips the unique
+		// index on token_hash. Surface it as a typed error so the refresh
+		// flow can treat it as a benign lost race instead of a 500.
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation && pqErr.Constraint == "idx_refresh_tokens_token_hash" {
+			return token.ErrDuplicateTokenHash
+		}
 		return fmt.Errorf("refresh_token_repository: create failed: %w", err)
 	}
 	return nil

@@ -221,7 +221,21 @@ func (s *Service) Refresh(ctx context.Context, rawRefreshToken string) (*TokenPa
 		return nil, ErrSessionExpired
 	}
 
-	return s.issueTokenPair(ctx, u, "")
+	pair, err := s.issueTokenPair(ctx, u, "")
+	if err != nil {
+		// Two concurrent refreshes for the same user within the same second
+		// mint an identical token (deterministic JWT, no nonce); the request
+		// that loses the race to persist it lands here. The presented token
+		// is already revoked, so this is a spent-token 401, not a
+		// persistence failure — and a benign race, not a theft signal, so it
+		// does NOT revoke the user's other sessions.
+		if errors.Is(err, token.ErrDuplicateTokenHash) {
+			s.log.Info("refresh token rotation raced; treating as expired session", "user_id", stored.UserID)
+			return nil, ErrSessionExpired
+		}
+		return nil, err
+	}
+	return pair, nil
 }
 
 // Logout revokes a single session's refresh token.
