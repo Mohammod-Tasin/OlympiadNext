@@ -66,9 +66,12 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `POST /api/auth/admin/refresh`, `/logout` | admin refresh cookie (`admin_refresh_token`, path `/api/auth/admin`) |
 | `POST /api/user/upload-file` (multipart `file`; PDF or image) | access token |
 | `PUT /api/user/profile` (onboarding + profile edits: academic fields, optional `verification_doc`) | access token |
-| `GET /api/client/events` | none |
+| `POST /api/user/registrations` (exam registration: `event_id`, `payment_method`, `sender_number`, `transaction_id`) | access token |
+| `GET /api/user/registrations` (the caller's own registrations + status) | access token |
+| `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`) | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
+| `GET /api/admin/registrations?status=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`) | access token + admin |
 | `GET /uploads/*` (event images) | none |
 | `GET /uploads/users/{userID}/{name}` (KYC files) | access token; owner or admin only |
 
@@ -102,6 +105,23 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   `issueEmailOTP` logs the code as a `WARN` and returns success rather than
   failing the request — Render blocks outbound SMTP (465/587), so a live send
   times out there every time.
+- **Exam registration (manual payment).** A student pays an event's
+  `registration_fee` to its `bkash_number` / `nagad_number` (per-event
+  columns, not a global setting) and submits the wallet TrxID via
+  `POST /api/user/registrations`. `exam_registrations.status` moves
+  `pending → approved | rejected`; an admin decides via
+  `PUT /api/admin/registrations/{id}/review`, which stamps `reviewed_by`
+  (the authenticated admin) and `reviewed_at`. Two UNIQUE constraints make
+  fraud/dupes hard and are deliberately terminal — there is **no**
+  resubmission: `uq_exam_reg_transaction_id` (a TrxID backs one
+  registration ever, by anyone) and `uq_exam_reg_user_event` (one
+  registration per student per exam). The repo maps each violation to its
+  own sentinel (`ErrDuplicateTransactionID` / `ErrAlreadyRegistered` →
+  distinct 409s). Registration does **not** require `verification_status =
+  verified` — any authenticated student may submit; the manual payment
+  check is the fraud gate. The submit endpoint sits in the `/api/user`
+  group so it shares that tier's per-IP rate limit. TrxID is upper-cased
+  and `sender_number` normalised to `01XXXXXXXXX` before persistence.
 - **Student verification (KYC).** `users.verification_status` moves
   `unverified → pending → verified | rejected` (rejected users may resubmit).
   `POST /api/user/upload-file` stores a PDF/image under `uploads/users/<userID>/`

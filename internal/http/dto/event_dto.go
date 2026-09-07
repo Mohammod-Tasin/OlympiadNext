@@ -12,17 +12,24 @@ type EventRequest struct {
 	ImageURL    string `json:"image_url"`
 	EventDate   string `json:"event_date"`
 	IsActive    bool   `json:"is_active"`
+	// Manual bKash/Nagad payment details for exam registration. Optional.
+	BkashNumber     string `json:"bkash_number"`
+	NagadNumber     string `json:"nagad_number"`
+	RegistrationFee int    `json:"registration_fee"`
 }
 
 type EventResponse struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	ImageURL    string    `json:"image_url"`
-	EventDate   time.Time `json:"event_date"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Title           string    `json:"title"`
+	Description     string    `json:"description"`
+	ImageURL        string    `json:"image_url"`
+	EventDate       time.Time `json:"event_date"`
+	IsActive        bool      `json:"is_active"`
+	BkashNumber     string    `json:"bkash_number"`
+	NagadNumber     string    `json:"nagad_number"`
+	RegistrationFee int       `json:"registration_fee"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // UploadResponse is returned by POST /api/admin/events/upload; the value

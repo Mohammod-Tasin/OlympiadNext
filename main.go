@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"olympiadnext/internal/app/events"
+	"olympiadnext/internal/app/registrations"
 	"olympiadnext/internal/auth"
 	"olympiadnext/internal/auth/google"
 	"olympiadnext/internal/auth/jwt"
@@ -59,6 +60,7 @@ func main() {
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(conn)
 	deviceRepo := postgres.NewDeviceRepository(conn)
 	eventRepo := postgres.NewEventRepository(conn)
+	registrationRepo := postgres.NewRegistrationRepository(conn)
 	emailSender := email.NewSMTPClient(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, log)
 	jwtManager := jwt.NewManager(cfg.JWTAccessSecret, cfg.JWTRefreshSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 	googleVerifier := google.NewVerifier(cfg.GoogleClientID)
@@ -79,7 +81,10 @@ func main() {
 	eventService := events.NewService(eventRepo, log)
 	eventHandler := handler.NewEventHandler(eventService, fileStorage, log)
 
-	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
+	registrationService := registrations.NewService(registrationRepo, eventRepo, log)
+	registrationHandler := handler.NewRegistrationHandler(registrationService, log)
+
+	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, registrationHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + cfg.Port,
