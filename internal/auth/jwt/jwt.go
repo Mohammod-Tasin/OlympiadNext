@@ -5,12 +5,27 @@
 package jwt
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// newJTI returns a random 16-byte token identifier as hex. It is set as
+// the `jti` claim on every token so that two tokens issued for the same
+// user in the same second are never byte-identical — the root-cause fix
+// for the token_hash unique-index collisions the duplicate-key handling
+// downstream was only papering over.
+func newJTI() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("jwt: generate jti failed: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
 
 var (
 	ErrInvalidToken = errors.New("jwt: invalid or expired token")
@@ -48,10 +63,15 @@ func (m *Manager) RefreshTokenTTL() time.Duration { return m.refreshTTL }
 
 func (m *Manager) GenerateAccessToken(userID, email string) (string, error) {
 	now := time.Now()
+	jti, err := newJTI()
+	if err != nil {
+		return "", err
+	}
 	claims := AccessClaims{
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(m.accessTTL)),
 		},
@@ -66,9 +86,14 @@ func (m *Manager) GenerateAccessToken(userID, email string) (string, error) {
 func (m *Manager) GenerateRefreshToken(userID string) (string, time.Time, error) {
 	now := time.Now()
 	expiresAt := now.Add(m.refreshTTL)
+	jti, err := newJTI()
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	claims := RefreshClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
