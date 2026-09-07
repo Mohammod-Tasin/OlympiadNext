@@ -20,6 +20,7 @@ func NewRouter(
 	userHandler *handler.UserHandler,
 	adminHandler *handler.AdminHandler,
 	eventHandler *handler.EventHandler,
+	registrationHandler *handler.RegistrationHandler,
 	jwtManager *jwt.Manager,
 	users user.Repository,
 	allowedOrigins []string,
@@ -87,6 +88,12 @@ func NewRouter(
 
 		r.Post("/upload-file", userHandler.UploadFile)
 		r.Put("/profile", userHandler.SubmitProfile)
+
+		// Manual exam-registration payment: submit a bKash/Nagad TrxID,
+		// then poll your own registration status. Same rate-limit tier as
+		// the rest of /api/user/*.
+		r.Post("/registrations", registrationHandler.Create)
+		r.Get("/registrations", registrationHandler.ListMine)
 	})
 
 	// Client surface: public, read-only content consumed by the client
@@ -111,6 +118,11 @@ func NewRouter(
 
 		r.Get("/users", adminHandler.ListUsers)
 		r.Put("/users/{id}/verify", adminHandler.VerifyUser)
+
+		// Exam-registration payment review queue, mirroring the KYC queue
+		// above: list by ?status=pending, then approve/reject each.
+		r.Get("/registrations", registrationHandler.ListForReview)
+		r.Put("/registrations/{id}/review", registrationHandler.Review)
 	})
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {

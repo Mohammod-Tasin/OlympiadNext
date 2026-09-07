@@ -153,23 +153,29 @@ func decodeEventInput(w http.ResponseWriter, r *http.Request) (events.Input, boo
 	}
 
 	return events.Input{
-		Title:       req.Title,
-		Description: req.Description,
-		ImageURL:    req.ImageURL,
-		EventDate:   eventDate,
-		IsActive:    req.IsActive,
+		Title:           req.Title,
+		Description:     req.Description,
+		ImageURL:        req.ImageURL,
+		EventDate:       eventDate,
+		IsActive:        req.IsActive,
+		BkashNumber:     req.BkashNumber,
+		NagadNumber:     req.NagadNumber,
+		RegistrationFee: req.RegistrationFee,
 	}, true
 }
 
 func toEventResponse(e *event.Event) dto.EventResponse {
 	return dto.EventResponse{
-		ID:          e.ID,
-		Title:       e.Title,
-		Description: e.Description,
-		ImageURL:    e.ImageURL,
-		EventDate:   e.EventDate,
-		IsActive:    e.IsActive,
-		CreatedAt:   e.CreatedAt,
-		UpdatedAt:   e.UpdatedAt,
+		ID:              e.ID,
+		Title:           e.Title,
+		Description:     e.Description,
+		ImageURL:        e.ImageURL,
+		EventDate:       e.EventDate,
+		IsActive:        e.IsActive,
+		BkashNumber:     e.BkashNumber,
+		NagadNumber:     e.NagadNumber,
+		RegistrationFee: e.RegistrationFee,
+		CreatedAt:       e.CreatedAt,
+		UpdatedAt:       e.UpdatedAt,
 	}
 }

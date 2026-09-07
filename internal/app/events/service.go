@@ -30,6 +30,11 @@ type Input struct {
 	ImageURL    string
 	EventDate   time.Time
 	IsActive    bool
+	// Manual-payment details for exam registration. All optional: an event
+	// with no fee configured yet leaves them blank / zero.
+	BkashNumber     string
+	NagadNumber     string
+	RegistrationFee int
 }
 
 func (in Input) validate() error {
@@ -38,6 +43,9 @@ func (in Input) validate() error {
 	}
 	if in.EventDate.IsZero() {
 		return fmt.Errorf("%w: event_date is required", ErrValidation)
+	}
+	if in.RegistrationFee < 0 {
+		return fmt.Errorf("%w: registration_fee cannot be negative", ErrValidation)
 	}
 	return nil
 }
@@ -58,11 +66,14 @@ func (s *Service) CreateEvent(ctx context.Context, in Input) (*event.Event, erro
 	}
 
 	e := &event.Event{
-		Title:       strings.TrimSpace(in.Title),
-		Description: in.Description,
-		ImageURL:    in.ImageURL,
-		EventDate:   in.EventDate,
-		IsActive:    in.IsActive,
+		Title:           strings.TrimSpace(in.Title),
+		Description:     in.Description,
+		ImageURL:        in.ImageURL,
+		EventDate:       in.EventDate,
+		IsActive:        in.IsActive,
+		BkashNumber:     strings.TrimSpace(in.BkashNumber),
+		NagadNumber:     strings.TrimSpace(in.NagadNumber),
+		RegistrationFee: in.RegistrationFee,
 	}
 	if err := s.events.Create(ctx, e); err != nil {
 		return nil, err
@@ -90,6 +101,9 @@ func (s *Service) UpdateEvent(ctx context.Context, id string, in Input) (*event.
 	existing.ImageURL = in.ImageURL
 	existing.EventDate = in.EventDate
 	existing.IsActive = in.IsActive
+	existing.BkashNumber = strings.TrimSpace(in.BkashNumber)
+	existing.NagadNumber = strings.TrimSpace(in.NagadNumber)
+	existing.RegistrationFee = in.RegistrationFee
 
 	if err := s.events.Update(ctx, existing); err != nil {
 		return nil, err

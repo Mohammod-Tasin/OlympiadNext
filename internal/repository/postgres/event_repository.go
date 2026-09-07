@@ -9,7 +9,7 @@ import (
 	"olympiadnext/internal/domain/event"
 )
 
-const eventColumns = `id, title, description, image_url, event_date, is_active, created_at, updated_at`
+const eventColumns = `id, title, description, image_url, event_date, is_active, bkash_number, nagad_number, registration_fee, created_at, updated_at`
 
 type EventRepository struct {
 	db *sql.DB
@@ -21,11 +21,11 @@ func NewEventRepository(db *sql.DB) *EventRepository {
 
 func (r *EventRepository) Create(ctx context.Context, e *event.Event) error {
 	const q = `
-		INSERT INTO events (id, title, description, image_url, event_date, is_active, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now(), now())
+		INSERT INTO events (id, title, description, image_url, event_date, is_active, bkash_number, nagad_number, registration_fee, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, now(), now())
 		RETURNING id, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, e.Title, e.Description, e.ImageURL, e.EventDate, e.IsActive).
+	err := r.db.QueryRowContext(ctx, q, e.Title, e.Description, e.ImageURL, e.EventDate, e.IsActive, e.BkashNumber, e.NagadNumber, e.RegistrationFee).
 		Scan(&e.ID, &e.CreatedAt, &e.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("event_repository: create failed: %w", err)
@@ -36,11 +36,12 @@ func (r *EventRepository) Create(ctx context.Context, e *event.Event) error {
 func (r *EventRepository) Update(ctx context.Context, e *event.Event) error {
 	const q = `
 		UPDATE events
-		SET title = $1, description = $2, image_url = $3, event_date = $4, is_active = $5, updated_at = now()
-		WHERE id = $6
+		SET title = $1, description = $2, image_url = $3, event_date = $4, is_active = $5,
+		    bkash_number = $6, nagad_number = $7, registration_fee = $8, updated_at = now()
+		WHERE id = $9
 		RETURNING updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, e.Title, e.Description, e.ImageURL, e.EventDate, e.IsActive, e.ID).
+	err := r.db.QueryRowContext(ctx, q, e.Title, e.Description, e.ImageURL, e.EventDate, e.IsActive, e.BkashNumber, e.NagadNumber, e.RegistrationFee, e.ID).
 		Scan(&e.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return event.ErrNotFound
@@ -68,7 +69,7 @@ func (r *EventRepository) FindActive(ctx context.Context) (*event.Event, error) 
 
 func (r *EventRepository) scanOne(row *sql.Row) (*event.Event, error) {
 	var e event.Event
-	err := row.Scan(&e.ID, &e.Title, &e.Description, &e.ImageURL, &e.EventDate, &e.IsActive, &e.CreatedAt, &e.UpdatedAt)
+	err := row.Scan(&e.ID, &e.Title, &e.Description, &e.ImageURL, &e.EventDate, &e.IsActive, &e.BkashNumber, &e.NagadNumber, &e.RegistrationFee, &e.CreatedAt, &e.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, event.ErrNotFound
 	}

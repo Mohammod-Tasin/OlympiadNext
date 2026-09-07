@@ -18,8 +18,16 @@ type Event struct {
 	ImageURL    string
 	EventDate   time.Time
 	IsActive    bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Per-event manual-payment details for exam registration. BkashNumber
+	// and NagadNumber are the merchant numbers a student sends the fee to;
+	// RegistrationFee is whole Bangladeshi Taka (0 = not set yet). They are
+	// surfaced on the public client event so the payment page can render
+	// them.
+	BkashNumber     string
+	NagadNumber     string
+	RegistrationFee int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // Repository abstracts persistence for Event so the application layer
