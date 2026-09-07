@@ -345,13 +345,12 @@ func (s *Service) issueTokenPair(ctx context.Context, u *user.User, deviceFinger
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	}
 
-	// Access/refresh tokens are deterministic — user id plus second-
-	// granularity timestamps, no nonce — so two issuances for the same user
-	// in the same second are byte-identical. When a concurrent request has
-	// already persisted this exact token, Create reports
-	// ErrDuplicateTokenHash: the row is there and the JWTs we built are
-	// valid, so it is carried up as a signal rather than a hard failure. The
-	// login / sign-in paths treat it as idempotent success
+	// Every token now carries a random `jti` claim, so two issuances for the
+	// same user can no longer be byte-identical and this branch should never
+	// fire in practice. It is kept as defense in depth: if Create ever still
+	// reports ErrDuplicateTokenHash, the row is there and the JWTs we built
+	// are valid, so it is carried up as a signal rather than a hard failure.
+	// The login / sign-in paths treat it as idempotent success
 	// (issueSessionAfterAuth); Refresh rejects it, because there the
 	// colliding row is the one it just revoked.
 	dupErr := s.refreshTokens.Create(ctx, &token.RefreshToken{
