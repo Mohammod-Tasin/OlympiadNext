@@ -34,4 +34,18 @@ type Repository interface {
 	ListUsers(ctx context.Context, status VerificationStatus, limit int) ([]*User, error)
 	// SetVerificationStatus records an admin's review decision.
 	SetVerificationStatus(ctx context.Context, userID string, status VerificationStatus) error
+
+	// SetNotificationMethod sets the delivery channel directly. Used to
+	// switch back to 'email', which needs no verification.
+	SetNotificationMethod(ctx context.Context, userID string, method NotificationMethod) error
+	// SetNotificationPhoneOTP records the phone number an OTP is being sent
+	// to plus the freshly generated code and its expiry, and resets
+	// notification_phone_verified to false (the number is unproven again).
+	// It does NOT change notification_method — that only moves to 'phone'
+	// once the code is verified.
+	SetNotificationPhoneOTP(ctx context.Context, userID, phone, code string, expiresAt time.Time) error
+	// MarkNotificationPhoneVerified flips notification_phone_verified to
+	// true, sets notification_method to 'phone', and clears the outstanding
+	// code in one UPDATE so it cannot be replayed.
+	MarkNotificationPhoneVerified(ctx context.Context, userID string) error
 }

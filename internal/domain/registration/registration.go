@@ -64,8 +64,13 @@ type Registration struct {
 	Status        Status
 	ReviewedBy    *string
 	ReviewedAt    *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// AdmitCardURL is the storage path of the admin-uploaded admit card
+	// (e.g. "/uploads/admit-cards/<userID>/<uuid>.pdf"), nil until issued.
+	// Only an approved registration can be given one.
+	AdmitCardURL        *string
+	AdmitCardUploadedAt *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // Detail is a Registration plus the joined display fields the review queue
@@ -105,4 +110,9 @@ type Repository interface {
 	// review metadata in the same guarded UPDATE. It returns
 	// ErrInvalidUnrejectTransition unless the row is currently rejected.
 	Unreject(ctx context.Context, id string) error
+	// SetAdmitCard stores the admit-card path and stamps
+	// admit_card_uploaded_at, but only while the row is 'approved'. It
+	// returns ErrNotFound for an unknown id and ErrNotApproved when the
+	// registration is not in the approved state.
+	SetAdmitCard(ctx context.Context, id, url string) error
 }

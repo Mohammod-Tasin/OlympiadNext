@@ -24,6 +24,12 @@ type Config struct {
 	SMTPPort         string
 	SMTPUsername     string
 	SMTPPassword     string
+	// BulkSMSBD delivers transactional SMS (the admit-card-ready alert and
+	// the notification-phone OTP). Optional: when unset the server still
+	// starts, and the SMS adapter fails a send with a clear
+	// sms.ErrNotConfigured rather than blocking startup.
+	BulkSMSBDAPIKey   string
+	BulkSMSBDSenderID string
 }
 
 // Load reads configuration from the environment and fails fast if a
@@ -61,6 +67,11 @@ func Load() (*Config, error) {
 		SMTPPort:     getEnv("SMTP_PORT", "465"),
 		SMTPUsername: os.Getenv("SMTP_USERNAME"),
 		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
+		// Optional: SMS is a best-effort notification channel. An unset key
+		// does not stop the server — sms.BulkSMSBDClient returns
+		// sms.ErrNotConfigured on the first send instead.
+		BulkSMSBDAPIKey:   os.Getenv("BULKSMSBD_API_KEY"),
+		BulkSMSBDSenderID: os.Getenv("BULKSMSBD_SENDER_ID"),
 	}
 
 	var err error

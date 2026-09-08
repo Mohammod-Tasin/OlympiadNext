@@ -8,4 +8,5 @@ var (
 	ErrDuplicateTransactionID    = errors.New("this transaction id has already been submitted")
 	ErrAlreadyReviewed           = errors.New("registration has already been reviewed")
 	ErrInvalidUnrejectTransition = errors.New("only a rejected registration can be returned to pending")
+	ErrNotApproved               = errors.New("registration is not approved")
 )

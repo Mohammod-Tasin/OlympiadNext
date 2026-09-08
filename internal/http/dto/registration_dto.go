@@ -24,6 +24,11 @@ type RegistrationResponse struct {
 	Status        string     `json:"status"`
 	CreatedAt     time.Time  `json:"created_at"`
 	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
+	// AdmitCardURL is the gated download path for the admin-issued admit
+	// card, present once an admin has uploaded it for an approved
+	// registration.
+	AdmitCardURL        *string    `json:"admit_card_url,omitempty"`
+	AdmitCardUploadedAt *time.Time `json:"admit_card_uploaded_at,omitempty"`
 }
 
 type RegistrationListResponse struct {

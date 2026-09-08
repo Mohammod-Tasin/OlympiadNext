@@ -16,7 +16,7 @@ const pgUniqueViolation = "23505"
 
 // userColumns is the full projection scanned by scanUser, in struct-field
 // order. Every SELECT that feeds scanUser must use exactly this list.
-const userColumns = `id, email, full_name, password_hash, auth_provider, google_id, active_device_fingerprint, role, email_verified, email_otp, email_otp_expiry, institution_name, level, medium, profile_picture, verification_doc, verification_status, created_at, updated_at`
+const userColumns = `id, email, full_name, password_hash, auth_provider, google_id, active_device_fingerprint, role, email_verified, email_otp, email_otp_expiry, institution_name, level, medium, profile_picture, verification_doc, verification_status, notification_method, notification_phone, notification_phone_verified, notification_phone_otp, notification_phone_otp_expiry, created_at, updated_at`
 
 type UserRepository struct {
 	db *sql.DB
@@ -214,6 +214,55 @@ func (r *UserRepository) SetVerificationStatus(ctx context.Context, userID strin
 	return checkRowsAffected(res)
 }
 
+// SetNotificationMethod sets the delivery channel directly (used for the
+// no-verification switch back to 'email').
+func (r *UserRepository) SetNotificationMethod(ctx context.Context, userID string, method user.NotificationMethod) error {
+	const q = `UPDATE users SET notification_method = $1, updated_at = now() WHERE id = $2`
+	res, err := r.db.ExecContext(ctx, q, method, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: set notification method failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// SetNotificationPhoneOTP stores the target phone number and a fresh
+// verification code, overwriting any earlier code and marking the number
+// unverified again. notification_method is left untouched.
+func (r *UserRepository) SetNotificationPhoneOTP(ctx context.Context, userID, phone, code string, expiresAt time.Time) error {
+	const q = `
+		UPDATE users
+		SET notification_phone = $1,
+		    notification_phone_otp = $2,
+		    notification_phone_otp_expiry = $3,
+		    notification_phone_verified = false,
+		    updated_at = now()
+		WHERE id = $4`
+	res, err := r.db.ExecContext(ctx, q, phone, code, expiresAt, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: set notification phone otp failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
+// MarkNotificationPhoneVerified flips the number to verified, promotes the
+// channel to 'phone', and clears the code in one statement so it cannot be
+// replayed.
+func (r *UserRepository) MarkNotificationPhoneVerified(ctx context.Context, userID string) error {
+	const q = `
+		UPDATE users
+		SET notification_phone_verified = true,
+		    notification_method = 'phone',
+		    notification_phone_otp = NULL,
+		    notification_phone_otp_expiry = NULL,
+		    updated_at = now()
+		WHERE id = $1`
+	res, err := r.db.ExecContext(ctx, q, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: mark notification phone verified failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, letting scanUser
 // serve single-row lookups and list iteration alike.
 type rowScanner interface {
@@ -226,7 +275,9 @@ func scanUser(s rowScanner) (*user.User, error) {
 		&u.ID, &u.Email, &u.FullName, &u.PasswordHash, &u.AuthProvider, &u.GoogleID,
 		&u.ActiveDeviceFingerprint, &u.Role, &u.EmailVerified, &u.EmailOTP, &u.EmailOTPExpiry,
 		&u.InstitutionName, &u.Level, &u.Medium, &u.ProfilePicture, &u.VerificationDoc,
-		&u.VerificationStatus, &u.CreatedAt, &u.UpdatedAt,
+		&u.VerificationStatus, &u.NotificationMethod, &u.NotificationPhone,
+		&u.NotificationPhoneVerified, &u.NotificationPhoneOTP, &u.NotificationPhoneOTPExpiry,
+		&u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, user.ErrNotFound

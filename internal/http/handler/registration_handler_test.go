@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"olympiadnext/internal/app/registrations"
 	"olympiadnext/internal/domain/event"
 	"olympiadnext/internal/domain/registration"
@@ -34,9 +36,51 @@ func (f listReviewEventRepo) FindByID(ctx context.Context, id string) (*event.Ev
 	return f.findByID(ctx, id)
 }
 
+// admitCardRegistrationRepo is a registration.Repository whose only wired
+// method is FindByID, for the admit-card precondition test.
+type admitCardRegistrationRepo struct {
+	registration.Repository
+	findByID func(context.Context, string) (*registration.Registration, error)
+}
+
+func (f admitCardRegistrationRepo) FindByID(ctx context.Context, id string) (*registration.Registration, error) {
+	return f.findByID(ctx, id)
+}
+
+// TestUploadAdmitCard_RejectsNonApprovedRegistration checks the 409 guard:
+// an admit card can only be issued for an approved registration, and the
+// handler must bail out before touching storage or the notifier (both nil
+// here, so any use panics).
+func TestUploadAdmitCard_RejectsNonApprovedRegistration(t *testing.T) {
+	for _, status := range []registration.Status{
+		registration.StatusPending, registration.StatusRejected,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			regRepo := admitCardRegistrationRepo{findByID: func(_ context.Context, _ string) (*registration.Registration, error) {
+				return &registration.Registration{ID: "reg-1", UserID: "u1", Status: status}, nil
+			}}
+			h := NewRegistrationHandler(registrations.NewService(regRepo, nil, log), nil, nil, log)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/registrations/reg-1/admit-card", nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "reg-1")
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			res := httptest.NewRecorder()
+
+			h.UploadAdmitCard(res, req)
+
+			if res.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want %d; body: %s", res.Code, http.StatusConflict, res.Body.String())
+			}
+		})
+	}
+}
+
 func newListReviewHandler(regRepo registration.Repository, eventRepo event.Repository) *RegistrationHandler {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewRegistrationHandler(registrations.NewService(regRepo, eventRepo, log), log)
+	// storage and notifier are unused on the list/review paths under test.
+	return NewRegistrationHandler(registrations.NewService(regRepo, eventRepo, log), nil, nil, log)
 }
 
 func TestListForReview_AppliesStatusAndEventIDFilters(t *testing.T) {

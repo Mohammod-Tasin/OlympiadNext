@@ -112,6 +112,33 @@ func (s *Service) Register(ctx context.Context, userID string, in RegisterInput)
 	return reg, nil
 }
 
+// Get returns a single registration by id, or registration.ErrNotFound.
+// The admit-card upload handler uses it to learn the owner and current
+// status before storing a file.
+func (s *Service) Get(ctx context.Context, id string) (*registration.Registration, error) {
+	return s.registrations.FindByID(ctx, strings.TrimSpace(id))
+}
+
+// AttachAdmitCard records an admin-uploaded admit-card path against an
+// approved registration and returns the event title (best effort, for the
+// notification copy). The repository enforces the 'approved' precondition,
+// returning registration.ErrNotApproved otherwise.
+func (s *Service) AttachAdmitCard(ctx context.Context, id, url string) (eventTitle string, err error) {
+	id = strings.TrimSpace(id)
+	if err := s.registrations.SetAdmitCard(ctx, id, url); err != nil {
+		return "", err
+	}
+
+	s.log.Info("admit card attached", "registration_id", id, "url", url)
+
+	if reg, findErr := s.registrations.FindByID(ctx, id); findErr == nil {
+		if ev, evErr := s.events.FindByID(ctx, reg.EventID); evErr == nil {
+			eventTitle = ev.Title
+		}
+	}
+	return eventTitle, nil
+}
+
 // ListForUser returns the caller's own registrations, newest first, each
 // carrying its event title.
 func (s *Service) ListForUser(ctx context.Context, userID string) ([]*registration.Detail, error) {

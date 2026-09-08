@@ -13,6 +13,10 @@ type Sender interface {
 	// refused SMTP send), the returned error wraps ErrDeliveryFailed so a
 	// caller that only needs best-effort delivery can carry on.
 	SendOTP(ctx context.Context, toEmail, code string) error
+	// Send delivers an arbitrary transactional message (e.g. the
+	// admit-card-ready alert). Same best-effort contract as SendOTP: a
+	// transport failure wraps ErrDeliveryFailed.
+	Send(ctx context.Context, toEmail, subject, body string) error
 }
 
 // ErrDeliveryFailed marks an OTP email that could not be delivered —

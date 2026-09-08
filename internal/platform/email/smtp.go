@@ -56,6 +56,23 @@ func (c *SMTPClient) SendOTP(ctx context.Context, toEmail, code string) error {
 	return nil
 }
 
+// Send delivers an arbitrary transactional email (used for the
+// admit-card-ready notification). Like SendOTP it logs instead of sending
+// when SMTP is unconfigured, and wraps a live-send failure in
+// domain/email.ErrDeliveryFailed.
+func (c *SMTPClient) Send(ctx context.Context, toEmail, subject, body string) error {
+	if c.username == "" || c.password == "" {
+		c.log.Info(fmt.Sprintf("Email to %s [%s]: %s", toEmail, subject, body))
+		return nil
+	}
+
+	message := buildMessage(c.username, toEmail, subject, notificationHTML(subject, body))
+	if err := c.sendWithTimeout(ctx, toEmail, []byte(message)); err != nil {
+		return fmt.Errorf("%w: %v", domainemail.ErrDeliveryFailed, err)
+	}
+	return nil
+}
+
 // sendWithTimeout runs send on a goroutine and races it against ctx and
 // an 8s deadline, since net/smtp has no way to cancel or bound itself.
 func (c *SMTPClient) sendWithTimeout(ctx context.Context, toEmail string, message []byte) error {
@@ -129,6 +146,20 @@ func buildMessage(from, to, subject, htmlBody string) string {
 	b.WriteString("\r\n")
 	b.WriteString(htmlBody)
 	return b.String()
+}
+
+// notificationHTML renders a plain transactional message in the same
+// card layout as the OTP email.
+func notificationHTML(heading, body string) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+  <body style="font-family: Arial, sans-serif; background-color: #f4f4f7; padding: 24px; margin: 0;">
+    <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 8px; padding: 32px;">
+      <h2 style="color: #1a1a1a; margin-bottom: 16px;">%s</h2>
+      <p style="color: #555555; line-height: 1.6;">%s</p>
+    </div>
+  </body>
+</html>`, heading, body)
 }
 
 func otpEmailHTML(code string) string {

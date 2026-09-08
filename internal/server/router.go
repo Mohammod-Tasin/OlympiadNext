@@ -21,6 +21,7 @@ func NewRouter(
 	adminHandler *handler.AdminHandler,
 	eventHandler *handler.EventHandler,
 	registrationHandler *handler.RegistrationHandler,
+	notificationHandler *handler.NotificationHandler,
 	jwtManager *jwt.Manager,
 	users user.Repository,
 	allowedOrigins []string,
@@ -94,6 +95,13 @@ func NewRouter(
 		// the rest of /api/user/*.
 		r.Post("/registrations", registrationHandler.Create)
 		r.Get("/registrations", registrationHandler.ListMine)
+
+		// Transactional-notification preference: pick email or SMS, and
+		// prove a phone number with an OTP. resend-otp shares this group's
+		// per-IP rate limit, the same tier the email-OTP resend runs under.
+		r.Put("/notification-preference", notificationHandler.SetPreference)
+		r.Post("/notification-phone/verify-otp", notificationHandler.VerifyPhoneOTP)
+		r.Post("/notification-phone/resend-otp", notificationHandler.ResendPhoneOTP)
 	})
 
 	// Client surface: public, read-only content consumed by the client
@@ -124,6 +132,7 @@ func NewRouter(
 		r.Get("/registrations", registrationHandler.ListForReview)
 		r.Put("/registrations/{id}/review", registrationHandler.Review)
 		r.Put("/registrations/{id}/unreject", registrationHandler.Unreject)
+		r.Post("/registrations/{id}/admit-card", registrationHandler.UploadAdmitCard)
 	})
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -140,18 +149,24 @@ func NewRouter(
 // itself (it is not behind RequireAccessToken — see its doc comment), and
 // the public file server explicitly refuses anything under users/.
 func mountUploads(r chi.Router, uploadsDir string, userHandler *handler.UserHandler) {
-	const userPrefix = "users/"
+	// Gated subtrees: identity documents (KYC) and admit cards. Each is
+	// served only to the owning user or an admin, and the public file
+	// server refuses anything under these prefixes.
+	gatedPrefixes := []string{"users/", "admit-cards/"}
 
 	publicFiles := http.StripPrefix("/uploads/", http.FileServer(http.Dir(uploadsDir)))
 
 	r.Route("/uploads", func(r chi.Router) {
 		r.Get("/users/{userID}/{name}", userHandler.ServeUserFile)
+		r.Get("/admit-cards/{userID}/{name}", userHandler.ServeAdmitCard)
 
 		r.Handle("/*", http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			rel := strings.TrimPrefix(req.URL.Path, "/uploads/")
-			if rel == strings.TrimSuffix(userPrefix, "/") || strings.HasPrefix(rel, userPrefix) {
-				http.NotFound(w, req)
-				return
+			for _, p := range gatedPrefixes {
+				if rel == strings.TrimSuffix(p, "/") || strings.HasPrefix(rel, p) {
+					http.NotFound(w, req)
+					return
+				}
 			}
 			publicFiles.ServeHTTP(w, req)
 		}))

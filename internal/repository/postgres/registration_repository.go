@@ -17,8 +17,8 @@ import (
 // list aliased for the JOIN queries that also pull the event title and the
 // student's name/email.
 const (
-	registrationColumns   = `id, user_id, event_id, payment_method, sender_number, transaction_id, status, reviewed_by, reviewed_at, created_at, updated_at`
-	registrationColumnsER = `er.id, er.user_id, er.event_id, er.payment_method, er.sender_number, er.transaction_id, er.status, er.reviewed_by, er.reviewed_at, er.created_at, er.updated_at`
+	registrationColumns   = `id, user_id, event_id, payment_method, sender_number, transaction_id, status, reviewed_by, reviewed_at, admit_card_url, admit_card_uploaded_at, created_at, updated_at`
+	registrationColumnsER = `er.id, er.user_id, er.event_id, er.payment_method, er.sender_number, er.transaction_id, er.status, er.reviewed_by, er.reviewed_at, er.admit_card_url, er.admit_card_uploaded_at, er.created_at, er.updated_at`
 )
 
 type RegistrationRepository struct {
@@ -186,10 +186,39 @@ func (r *RegistrationRepository) Unreject(ctx context.Context, id string) error 
 	return nil
 }
 
+// SetAdmitCard attaches an admit-card path to an approved registration.
+// The `status = 'approved'` guard makes this concurrency-safe: a
+// registration that was never approved, or was rejected/unrejected in a
+// race, is left untouched and surfaces as ErrNotApproved (or ErrNotFound
+// for an unknown id) rather than silently issuing an admit card.
+func (r *RegistrationRepository) SetAdmitCard(ctx context.Context, id, url string) error {
+	const q = `
+		UPDATE exam_registrations
+		SET admit_card_url = $1, admit_card_uploaded_at = now(), updated_at = now()
+		WHERE id = $2 AND status = 'approved'`
+
+	res, err := r.db.ExecContext(ctx, q, url, id)
+	if err != nil {
+		return fmt.Errorf("registration_repository: set admit card failed: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("registration_repository: set admit card rows affected failed: %w", err)
+	}
+	if n == 0 {
+		if _, findErr := r.FindByID(ctx, id); errors.Is(findErr, registration.ErrNotFound) {
+			return registration.ErrNotFound
+		}
+		return registration.ErrNotApproved
+	}
+	return nil
+}
+
 func scanRegistrationInto(s rowScanner, reg *registration.Registration) error {
 	err := s.Scan(
 		&reg.ID, &reg.UserID, &reg.EventID, &reg.PaymentMethod, &reg.SenderNumber,
 		&reg.TransactionID, &reg.Status, &reg.ReviewedBy, &reg.ReviewedAt,
+		&reg.AdmitCardURL, &reg.AdmitCardUploadedAt,
 		&reg.CreatedAt, &reg.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -207,6 +236,7 @@ func scanDetailRow(rows *sql.Rows, d *registration.Detail, withStudent bool) err
 	dest := []any{
 		&d.ID, &d.UserID, &d.EventID, &d.PaymentMethod, &d.SenderNumber,
 		&d.TransactionID, &d.Status, &d.ReviewedBy, &d.ReviewedAt,
+		&d.AdmitCardURL, &d.AdmitCardUploadedAt,
 		&d.CreatedAt, &d.UpdatedAt, &d.EventTitle,
 	}
 	if withStudent {

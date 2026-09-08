@@ -27,7 +27,9 @@ Requires a live Postgres. Config comes from `.env` (gitignored) via godotenv; se
 `internal/config/config.go` for the full list. Required or the server exits:
 `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `GOOGLE_CLIENT_ID`.
 SMTP (`SMTP_*`) creds are optional — when unset, the sender logs the OTP to the
-console so local dev works without live delivery.
+console so local dev works without live delivery. `BULKSMSBD_API_KEY` /
+`BULKSMSBD_SENDER_ID` (SMS) are optional too and never block startup — an
+unset key fails only at send time with `sms.ErrNotConfigured`.
 
 ## Layout
 
@@ -37,12 +39,14 @@ Layered, hand-wired dependency injection in `main.go` (no DI framework):
 main.go                      config → db connect+migrate → repos → services → handlers → router
 internal/config/             env loading, fails fast on missing secrets
 internal/domain/             entities + repository INTERFACES + sentinel errors
-  user/ token/ device/ email/ event/
+  user/ token/ device/ email/ event/ registration/ sms/
 internal/auth/               service.go = all orchestration; sub-pkgs jwt/ hash/ google/ email/
 internal/app/events/         event service (admin content orchestration)
+internal/app/registrations/  exam-registration payment + admit-card orchestration
+internal/app/notify/         notification-channel preference, phone OTP, admit-card dispatch
 internal/repository/postgres/ implementations of the domain interfaces
-internal/http/               handler/ (auth, user, admin, event) middleware/ dto/ response/
-internal/platform/           db/ (+ embedded migrations/), email/ (SMTP), storage/ (local uploads)
+internal/http/               handler/ (auth, user, admin, event, registration, notification) middleware/ dto/ response/
+internal/platform/           db/ (+ embedded migrations/), email/ (SMTP), sms/ (BulkSMSBD), storage/ (local uploads)
 internal/server/router.go    the whole route table
 ```
 
@@ -67,13 +71,16 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `POST /api/user/upload-file` (multipart `file`; PDF or image) | access token |
 | `PUT /api/user/profile` (onboarding + profile edits: academic fields, optional `verification_doc`) | access token |
 | `POST /api/user/registrations` (exam registration: `event_id`, `payment_method`, `sender_number`, `transaction_id`) | access token |
-| `GET /api/user/registrations` (the caller's own registrations + status) | access token |
+| `GET /api/user/registrations` (the caller's own registrations + status, incl. `admit_card_url`) | access token |
+| `PUT /api/user/notification-preference` (`{method:"email"\|"phone", phone}`; phone sends an SMS OTP, channel stays `email` until verified) | access token |
+| `POST /api/user/notification-phone/verify-otp` (`{otp}`), `/notification-phone/resend-otp` (no body) | access token |
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`) | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
 | `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
+| `POST /api/admin/registrations/{id}/admit-card` (multipart `file`, PDF only; 409 unless the registration is `approved`) | access token + admin |
 | `GET /uploads/*` (event images) | none |
-| `GET /uploads/users/{userID}/{name}` (KYC files) | access token; owner or admin only |
+| `GET /uploads/users/{userID}/{name}` (KYC files), `GET /uploads/admit-cards/{userID}/{name}` (admit cards) | access token; owner or admin only |
 
 ## Conventions that matter
 
@@ -124,6 +131,34 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   check is the fraud gate. The submit endpoint sits in the `/api/user`
   group so it shares that tier's per-IP rate limit. TrxID is upper-cased
   and `sender_number` normalised to `01XXXXXXXXX` before persistence.
+- **Admit cards.** Once a registration is `approved`, an admin uploads a
+  PDF admit card via `POST /api/admin/registrations/{id}/admit-card`. It is
+  stored under `uploads/admit-cards/<studentUserID>/`, only the path is
+  persisted (`exam_registrations.admit_card_url` + `admit_card_uploaded_at`),
+  and the file server gates it owner-or-admin exactly like KYC files (same
+  `serveProtectedFile` helper, `/uploads/admit-cards/*` refused by the
+  public server). `SetAdmitCard` re-checks `status = 'approved'` in SQL, so
+  a concurrent unreject cannot slip a card onto a non-approved row
+  (`registration.ErrNotApproved` → 409). After a successful upload the
+  student is notified on their chosen channel (see Notifications).
+- **Notifications & phone OTP.** `users.notification_method` (`email` default
+  / `phone`) is the channel for transactional alerts (currently only the
+  admit-card-ready message). A student opts into SMS with
+  `PUT /api/user/notification-preference` (`{method:"phone", phone}`), which
+  stores the number and sends a 6-digit OTP but leaves the active channel on
+  `email`; `POST /api/user/notification-phone/verify-otp` flips
+  `notification_phone_verified` and `notification_method` to `phone` in one
+  UPDATE that also nullifies the code. The phone-OTP flow mirrors the email
+  OTP exactly (`crypto/rand`, 5-minute TTL, constant-time compare,
+  best-effort delivery — a failed send logs the code as WARN and still
+  succeeds). These columns are deliberately separate from the phone/SMS
+  *auth* fields migration 0011 removed — this is a delivery preference, not
+  a login identity. SMS goes through BulkSMSBD (`internal/platform/sms`);
+  `BULKSMSBD_API_KEY` / `BULKSMSBD_SENDER_ID` are **optional** and never
+  block startup — an unset key surfaces as `sms.ErrNotConfigured` only on a
+  send attempt, logged at ERROR. `notify.Service.NotifyAdmitCardReady`
+  routes to SMS only when the user selected `phone` *and* verified it,
+  falling back to email otherwise.
 - **Student verification (KYC).** `users.verification_status` moves
   `unverified → pending → verified | rejected` (rejected users may resubmit).
   `POST /api/user/upload-file` stores a PDF/image under `uploads/users/<userID>/`

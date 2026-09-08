@@ -42,6 +42,23 @@ func (s VerificationStatus) Valid() bool {
 	}
 }
 
+// NotificationMethod is the channel a user receives transactional
+// notifications on. It stays 'email' (always available) until the user
+// verifies a phone number, at which point it may become 'phone'. These
+// fields are distinct from the removed phone/SMS *auth* identity — this is
+// a delivery preference, not a login credential.
+type NotificationMethod string
+
+const (
+	NotificationEmail NotificationMethod = "email"
+	NotificationPhone NotificationMethod = "phone"
+)
+
+// Valid reports whether m is one of the two supported channels.
+func (m NotificationMethod) Valid() bool {
+	return m == NotificationEmail || m == NotificationPhone
+}
+
 // User is the core domain entity. PasswordHash and GoogleID are pointers
 // because exactly one may be unset depending on how the account was created.
 type User struct {
@@ -69,8 +86,17 @@ type User struct {
 	ProfilePicture     *string
 	VerificationDoc    *string
 	VerificationStatus VerificationStatus
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	// Notification delivery preference. NotificationPhoneOTP mirrors
+	// EmailOTP: the plaintext code last issued to prove NotificationPhone,
+	// nil once consumed. NotificationMethod only flips to 'phone' once
+	// NotificationPhoneVerified is true.
+	NotificationMethod         NotificationMethod
+	NotificationPhone          *string
+	NotificationPhoneVerified  bool
+	NotificationPhoneOTP       *string
+	NotificationPhoneOTPExpiry *time.Time
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 }
 
 // OnboardingProfile is the payload behind PUT /api/user/profile, used for

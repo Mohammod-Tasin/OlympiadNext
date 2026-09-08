@@ -172,6 +172,23 @@ func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 // valid token. Here the rule is simply: no/invalid token -> 401; a valid
 // token that is neither the owner nor an admin -> 403.
 func (h *UserHandler) ServeUserFile(w http.ResponseWriter, r *http.Request) {
+	h.serveProtectedFile(w, r, "users")
+}
+
+// ServeAdmitCard handles GET /uploads/admit-cards/{userID}/{name}. Admit
+// cards are gated exactly like KYC files: served only to the student who
+// owns the registration or to an admin. See ServeUserFile's doc comment
+// for why the Bearer token is parsed here rather than via middleware.
+func (h *UserHandler) ServeAdmitCard(w http.ResponseWriter, r *http.Request) {
+	h.serveProtectedFile(w, r, "admit-cards")
+}
+
+// serveProtectedFile is the shared owner-or-admin file server behind the
+// gated /uploads subtrees. topDir is a hard-coded caller constant
+// ("users" / "admit-cards"); the {userID} path segment is the owner it
+// authorises against. No/invalid token -> 401; a valid token that is
+// neither the owner nor an admin -> 403.
+func (h *UserHandler) serveProtectedFile(w http.ResponseWriter, r *http.Request, topDir string) {
 	claims, err := h.jwt.ParseAccessToken(middleware.ExtractBearerToken(r.Header.Get("Authorization")))
 	if err != nil {
 		response.Error(w, http.StatusUnauthorized, "missing or invalid access token")
@@ -184,7 +201,7 @@ func (h *UserHandler) ServeUserFile(w http.ResponseWriter, r *http.Request) {
 	if claims.UserID != ownerID {
 		role, err := h.users.GetRole(r.Context(), claims.UserID)
 		if err != nil {
-			h.log.Error("serve user file: role lookup failed", "user_id", claims.UserID, "error", err)
+			h.log.Error("serve protected file: role lookup failed", "user_id", claims.UserID, "error", err)
 			response.Error(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -194,7 +211,7 @@ func (h *UserHandler) ServeUserFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	diskPath, err := h.storage.UserFilePath(ownerID, name)
+	diskPath, err := h.storage.ProtectedFilePath(topDir, ownerID, name)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "file not found")
 		return
