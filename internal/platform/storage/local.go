@@ -88,10 +88,18 @@ func (s *LocalStorage) Save(subdir, origName string, src io.Reader) (string, err
 // to its on-disk path, rejecting any ownerID or name that is not a single
 // clean path element (defence in depth against traversal).
 func (s *LocalStorage) UserFilePath(ownerID, name string) (string, error) {
-	if !isCleanSegment(ownerID) || !isCleanSegment(name) {
+	return s.ProtectedFilePath("users", ownerID, name)
+}
+
+// ProtectedFilePath resolves "<topDir>/<ownerID>/<name>" (e.g.
+// "admit-cards/<userID>/<uuid>.pdf") to its on-disk path. topDir must be a
+// known, hard-coded caller constant; ownerID and name are rejected unless
+// each is a single clean path element, defending against traversal.
+func (s *LocalStorage) ProtectedFilePath(topDir, ownerID, name string) (string, error) {
+	if !isCleanSegment(topDir) || !isCleanSegment(ownerID) || !isCleanSegment(name) {
 		return "", fmt.Errorf("storage: invalid file reference")
 	}
-	return filepath.Join(s.dir, "users", ownerID, name), nil
+	return filepath.Join(s.dir, topDir, ownerID, name), nil
 }
 
 // ValidateImage checks that filename has an accepted image extension and
@@ -103,6 +111,20 @@ func ValidateImage(filename string, head []byte) error {
 	}
 	if !strings.HasPrefix(http.DetectContentType(head), "image/") {
 		return fmt.Errorf("%w: file content is not a valid image", ErrUnsupportedType)
+	}
+	return nil
+}
+
+// ValidatePDF checks that filename has a .pdf extension and that head
+// carries the %PDF- magic, so a renamed non-PDF is rejected. Used by the
+// admit-card upload, which is PDF-only.
+func ValidatePDF(filename string, head []byte) error {
+	if strings.ToLower(filepath.Ext(filename)) != ".pdf" {
+		return fmt.Errorf("%w: an admit card must be a PDF", ErrUnsupportedType)
+	}
+	// http.DetectContentType returns "application/pdf" for the %PDF- magic.
+	if http.DetectContentType(head) != "application/pdf" {
+		return fmt.Errorf("%w: file content is not a valid PDF", ErrUnsupportedType)
 	}
 	return nil
 }
