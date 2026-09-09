@@ -139,6 +139,13 @@ func (s *Service) AttachAdmitCard(ctx context.Context, id, url string) (eventTit
 	return eventTitle, nil
 }
 
+// IsRegistered reports whether the student already has a registration
+// (in any status) for the event. It backs the is_registered flag the
+// client event view shows an authenticated caller.
+func (s *Service) IsRegistered(ctx context.Context, userID, eventID string) (bool, error) {
+	return s.registrations.ExistsForUserEvent(ctx, strings.TrimSpace(userID), strings.TrimSpace(eventID))
+}
+
 // ListForUser returns the caller's own registrations, newest first, each
 // carrying its event title.
 func (s *Service) ListForUser(ctx context.Context, userID string) ([]*registration.Detail, error) {

@@ -62,6 +62,18 @@ func (r *RegistrationRepository) FindByID(ctx context.Context, id string) (*regi
 	return &reg, nil
 }
 
+// ExistsForUserEvent answers the is_registered flag on the client event
+// view with a single EXISTS probe — no row is fetched.
+func (r *RegistrationRepository) ExistsForUserEvent(ctx context.Context, userID, eventID string) (bool, error) {
+	const q = `SELECT EXISTS (SELECT 1 FROM exam_registrations WHERE user_id = $1 AND event_id = $2)`
+
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, q, userID, eventID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("registration_repository: exists for user/event failed: %w", err)
+	}
+	return exists, nil
+}
+
 func (r *RegistrationRepository) ListByUser(ctx context.Context, userID string) ([]*registration.Detail, error) {
 	const q = `
 		SELECT ` + registrationColumnsER + `, e.title

@@ -11,8 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"olympiadnext/internal/app/events"
+	"olympiadnext/internal/app/registrations"
+	"olympiadnext/internal/auth/jwt"
 	"olympiadnext/internal/domain/event"
 	"olympiadnext/internal/http/dto"
+	"olympiadnext/internal/http/middleware"
 	"olympiadnext/internal/http/response"
 	"olympiadnext/internal/platform/storage"
 )
@@ -22,24 +25,47 @@ import (
 const maxUploadBytes = 100 << 20
 
 type EventHandler struct {
-	events  *events.Service
-	storage *storage.LocalStorage
-	log     *slog.Logger
+	events        *events.Service
+	registrations *registrations.Service
+	storage       *storage.LocalStorage
+	jwt           *jwt.Manager
+	log           *slog.Logger
 }
 
-func NewEventHandler(eventService *events.Service, fileStorage *storage.LocalStorage, log *slog.Logger) *EventHandler {
-	return &EventHandler{events: eventService, storage: fileStorage, log: log}
+func NewEventHandler(eventService *events.Service, registrationService *registrations.Service, fileStorage *storage.LocalStorage, jwtManager *jwt.Manager, log *slog.Logger) *EventHandler {
+	return &EventHandler{events: eventService, registrations: registrationService, storage: fileStorage, jwt: jwtManager, log: log}
 }
 
 // GetActiveEvent serves the client surface: the single event currently
 // published, or 404 when nothing is active.
+//
+// The route is public, but when the request carries a valid access token
+// the response also reports whether that student has already registered
+// for the event (is_registered), so the frontend can hide the payment
+// form. The token is parsed here rather than via RequireAccessToken
+// because the route must still serve anonymous callers, and because a
+// browser cannot attach X-Device-Fingerprint to every content fetch.
 func (h *EventHandler) GetActiveEvent(w http.ResponseWriter, r *http.Request) {
 	e, err := h.events.GetActiveEvent(r.Context())
 	if err != nil {
 		h.handleEventError(w, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, toEventResponse(e))
+
+	resp := toEventResponse(e)
+
+	if claims, err := h.jwt.ParseAccessToken(middleware.ExtractBearerToken(r.Header.Get("Authorization"))); err == nil {
+		registered, err := h.registrations.IsRegistered(r.Context(), claims.UserID, e.ID)
+		if err != nil {
+			// A failed check should not hide the event; log and leave the
+			// flag false rather than 500 the whole page.
+			h.log.Error("client event: is-registered check failed", "user_id", claims.UserID, "event_id", e.ID, "error", err)
+		} else {
+			resp.IsRegistered = registered
+		}
+	}
+
+	response.JSON(w, http.StatusOK, resp)
 }
 
 // Create handles POST /api/admin/events (admin-gated by middleware).

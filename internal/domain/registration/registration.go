@@ -94,6 +94,11 @@ type Repository interface {
 	Create(ctx context.Context, r *Registration) error
 	// FindByID returns ErrNotFound when the id does not exist.
 	FindByID(ctx context.Context, id string) (*Registration, error)
+	// ExistsForUserEvent reports whether the user already has a
+	// registration for the event in any status. It backs the is_registered
+	// flag on the client event view; the uq_exam_reg_user_event constraint
+	// means at most one such row can exist.
+	ExistsForUserEvent(ctx context.Context, userID, eventID string) (bool, error)
 	// ListByUser returns the caller's own registrations, newest first,
 	// each with its EventTitle populated.
 	ListByUser(ctx context.Context, userID string) ([]*Detail, error)

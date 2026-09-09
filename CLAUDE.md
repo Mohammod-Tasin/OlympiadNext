@@ -74,7 +74,7 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `GET /api/user/registrations` (the caller's own registrations + status, incl. `admit_card_url`) | access token |
 | `PUT /api/user/notification-preference` (`{method:"email"\|"phone", phone}`; phone sends an SMS OTP, channel stays `email` until verified) | access token |
 | `POST /api/user/notification-phone/verify-otp` (`{otp}`), `/notification-phone/resend-otp` (no body) | access token |
-| `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`) | none |
+| `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`; `is_registered` reflects the caller's own exam registration when a valid access token is sent) | none (optional access token) |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
 | `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
@@ -131,6 +131,12 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   check is the fraud gate. The submit endpoint sits in the `/api/user`
   group so it shares that tier's per-IP rate limit. TrxID is upper-cased
   and `sender_number` normalised to `01XXXXXXXXX` before persistence.
+  `GET /api/client/events` stays public but parses an optional access
+  token itself (like `serveProtectedFile`); with a valid one it adds
+  `is_registered` — a single `SELECT EXISTS` on `exam_registrations` for
+  `user_id + event_id`, true for a row in any status — so the frontend
+  can hide the payment form. A failed check logs and leaves the flag
+  `false` rather than failing the page.
 - **Admit cards.** Once a registration is `approved`, an admin uploads a
   PDF admit card via `POST /api/admin/registrations/{id}/admit-card`. It is
   stored under `uploads/admit-cards/<studentUserID>/`, only the path is

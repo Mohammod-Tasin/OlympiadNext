@@ -30,6 +30,11 @@ type EventResponse struct {
 	RegistrationFee int       `json:"registration_fee"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	// IsRegistered is true when the authenticated caller already has an
+	// exam registration (any status) for this event. It is always false on
+	// the admin create/update responses and on an unauthenticated client
+	// request, so the frontend can rely on it being present.
+	IsRegistered bool `json:"is_registered"`
 }
 
 // UploadResponse is returned by POST /api/admin/events/upload; the value
