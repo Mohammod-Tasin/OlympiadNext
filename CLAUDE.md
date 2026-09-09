@@ -10,8 +10,9 @@ Authentication is email/password (with an emailed OTP) plus Google OAuth. There
 is no phone/SMS auth — it was removed.
 
 Built so far: the auth/identity foundation, `student`/`admin` roles, admin-curated
-**events** (client-facing content blocks + image upload), and a manual **student
-verification (KYC)** flow (upload a proof document, admin approves/rejects).
+**events** (client-facing content blocks + image upload), an admin-curated
+bilingual **notice board**, and a manual **student verification (KYC)** flow
+(upload a proof document, admin approves/rejects).
 Contests, problems, submissions, and scoring are **not built yet**.
 
 ## Commands
@@ -39,13 +40,14 @@ Layered, hand-wired dependency injection in `main.go` (no DI framework):
 main.go                      config → db connect+migrate → repos → services → handlers → router
 internal/config/             env loading, fails fast on missing secrets
 internal/domain/             entities + repository INTERFACES + sentinel errors
-  user/ token/ device/ email/ event/ registration/ sms/
+  user/ token/ device/ email/ event/ notice/ registration/ sms/
 internal/auth/               service.go = all orchestration; sub-pkgs jwt/ hash/ google/ email/
 internal/app/events/         event service (admin content orchestration)
+internal/app/notices/        notice-board service (admin CRUD + public list)
 internal/app/registrations/  exam-registration payment + admit-card orchestration
 internal/app/notify/         notification-channel preference, phone OTP, admit-card dispatch
 internal/repository/postgres/ implementations of the domain interfaces
-internal/http/               handler/ (auth, user, admin, event, registration, notification) middleware/ dto/ response/
+internal/http/               handler/ (auth, user, admin, event, notice, registration, notification) middleware/ dto/ response/
 internal/platform/           db/ (+ embedded migrations/), email/ (SMTP), sms/ (BulkSMSBD), storage/ (local uploads)
 internal/server/router.go    the whole route table
 ```
@@ -75,7 +77,9 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `PUT /api/user/notification-preference` (`{method:"email"\|"phone", phone}`; phone sends an SMS OTP, channel stays `email` until verified) | access token |
 | `POST /api/user/notification-phone/verify-otp` (`{otp}`), `/notification-phone/resend-otp` (no body) | access token |
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`; `is_registered` reflects the caller's own exam registration when a valid access token is sent) | none (optional access token) |
+| `GET /api/client/notices` (active notices only, `display_order` ASC; each row carries `text_en` + `text_bn`) | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
+| `GET /api/admin/notices` (all notices, active or not), `POST /api/admin/notices`, `PUT /api/admin/notices/{id}` (`text_en`, `text_bn`, `display_order`, `is_active`), `DELETE /api/admin/notices/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
 | `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
 | `POST /api/admin/registrations/{id}/admit-card` (multipart `file`, PDF only; 409 unless the registration is `approved`) | access token + admin |

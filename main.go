@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"olympiadnext/internal/app/events"
+	"olympiadnext/internal/app/notices"
 	"olympiadnext/internal/app/notify"
 	"olympiadnext/internal/app/registrations"
 	"olympiadnext/internal/auth"
@@ -62,6 +63,7 @@ func main() {
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(conn)
 	deviceRepo := postgres.NewDeviceRepository(conn)
 	eventRepo := postgres.NewEventRepository(conn)
+	noticeRepo := postgres.NewNoticeRepository(conn)
 	registrationRepo := postgres.NewRegistrationRepository(conn)
 	emailSender := email.NewSMTPClient(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, log)
 	// SMS is optional: an unset API key does not stop startup — the client
@@ -87,12 +89,15 @@ func main() {
 	registrationService := registrations.NewService(registrationRepo, eventRepo, log)
 	eventHandler := handler.NewEventHandler(eventService, registrationService, fileStorage, jwtManager, log)
 
+	noticeService := notices.NewService(noticeRepo, log)
+	noticeHandler := handler.NewNoticeHandler(noticeService, log)
+
 	notifyService := notify.NewService(userRepo, emailSender, smsSender, log)
 	notificationHandler := handler.NewNotificationHandler(notifyService, log)
 
 	registrationHandler := handler.NewRegistrationHandler(registrationService, fileStorage, notifyService, log)
 
-	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, registrationHandler, notificationHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
+	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, noticeHandler, registrationHandler, notificationHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + cfg.Port,
