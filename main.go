@@ -84,12 +84,12 @@ func main() {
 	adminHandler := handler.NewAdminHandler(userRepo, log)
 
 	eventService := events.NewService(eventRepo, log)
-	eventHandler := handler.NewEventHandler(eventService, fileStorage, log)
+	registrationService := registrations.NewService(registrationRepo, eventRepo, log)
+	eventHandler := handler.NewEventHandler(eventService, registrationService, fileStorage, jwtManager, log)
 
 	notifyService := notify.NewService(userRepo, emailSender, smsSender, log)
 	notificationHandler := handler.NewNotificationHandler(notifyService, log)
 
-	registrationService := registrations.NewService(registrationRepo, eventRepo, log)
 	registrationHandler := handler.NewRegistrationHandler(registrationService, fileStorage, notifyService, log)
 
 	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, registrationHandler, notificationHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
