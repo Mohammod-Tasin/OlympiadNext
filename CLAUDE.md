@@ -213,3 +213,6 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 - `README.md` is user-facing and stale: it predates the device and
   academic-profile work and still documents phone/SMS auth. Trust the code
   over it.
+
+
+Before editing any file, always propose a plan first and wait for explicit approval — do not write code until the plan is approved, especially for anything touching auth, JWT, OTP, or KYC logic
