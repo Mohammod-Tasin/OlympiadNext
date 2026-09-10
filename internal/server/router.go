@@ -21,6 +21,7 @@ func NewRouter(
 	adminHandler *handler.AdminHandler,
 	eventHandler *handler.EventHandler,
 	noticeHandler *handler.NoticeHandler,
+	importantDateHandler *handler.ImportantDateHandler,
 	registrationHandler *handler.RegistrationHandler,
 	notificationHandler *handler.NotificationHandler,
 	jwtManager *jwt.Manager,
@@ -111,6 +112,7 @@ func NewRouter(
 		r.Use(appmw.RateLimitByIP(60, 20))
 		r.Get("/events", eventHandler.GetActiveEvent)
 		r.Get("/notices", noticeHandler.ListPublic)
+		r.Get("/important-dates", importantDateHandler.ListPublic)
 	})
 
 	// Admin surface: every route requires a valid access token AND an
@@ -131,6 +133,13 @@ func NewRouter(
 			r.Post("/", noticeHandler.Create)
 			r.Put("/{id}", noticeHandler.Update)
 			r.Delete("/{id}", noticeHandler.Delete)
+		})
+
+		r.Route("/important-dates", func(r chi.Router) {
+			r.Get("/", importantDateHandler.List)
+			r.Post("/", importantDateHandler.Create)
+			r.Put("/{id}", importantDateHandler.Update)
+			r.Delete("/{id}", importantDateHandler.Delete)
 		})
 
 		r.Get("/users", adminHandler.ListUsers)

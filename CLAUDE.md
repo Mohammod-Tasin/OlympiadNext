@@ -78,8 +78,10 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `POST /api/user/notification-phone/verify-otp` (`{otp}`), `/notification-phone/resend-otp` (no body) | access token |
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`; `is_registered` reflects the caller's own exam registration when a valid access token is sent) | none (optional access token) |
 | `GET /api/client/notices` (active notices only, `display_order` ASC; each row carries `text_en` + `text_bn`) | none |
+| `GET /api/client/important-dates` (active only, `event_date` ASC then `display_order` ASC; each row carries `event_date` as `YYYY-MM-DD`, `title`, `details_en`, `details_bn`) | none |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
 | `GET /api/admin/notices` (all notices, active or not), `POST /api/admin/notices`, `PUT /api/admin/notices/{id}` (`text_en`, `text_bn`, `display_order`, `is_active`), `DELETE /api/admin/notices/{id}` | access token + admin |
+| `GET /api/admin/important-dates` (all rows), `POST /api/admin/important-dates`, `PUT /api/admin/important-dates/{id}` (`event_date` `YYYY-MM-DD`, `title`, `details_en`, `details_bn`, `display_order`, `is_active`), `DELETE /api/admin/important-dates/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
 | `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
 | `POST /api/admin/registrations/{id}/admit-card` (multipart `file`, PDF only; 409 unless the registration is `approved`) | access token + admin |
@@ -213,3 +215,6 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 - `README.md` is user-facing and stale: it predates the device and
   academic-profile work and still documents phone/SMS auth. Trust the code
   over it.
+
+
+Before editing any file, always propose a plan first and wait for explicit approval — do not write code until the plan is approved, especially for anything touching auth, JWT, OTP, or KYC logic
