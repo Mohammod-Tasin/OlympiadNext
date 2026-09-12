@@ -164,30 +164,33 @@ func (s *Service) EndRound(ctx context.Context, id string) (*round.Round, error)
 
 // isEligibleForRound reports whether userID may enter rnd, independent of
 // rnd's own status/timing: round 1 requires an approved event
-// registration; round N>1 requires a 'qualified' decision in round N-1.
-// A missing round N-1, or a missing/non-qualifying decision in it, both
-// mean "not eligible" rather than an error.
-func (s *Service) isEligibleForRound(ctx context.Context, userID string, rnd *round.Round) (bool, error) {
+// registration; round N>1 requires a 'qualified' decision in round N-1. The
+// second return value, priorDecided, tells YourStatus whether an
+// ineligible round N>1 is ineligible because round N-1 was decided against
+// the student (true) or because round N-1 has no decision yet (false); it
+// is meaningless when eligible is true or RoundOrder is 1.
+func (s *Service) isEligibleForRound(ctx context.Context, userID string, rnd *round.Round) (eligible bool, priorDecided bool, err error) {
 	if rnd.RoundOrder == 1 {
-		return s.registrations.ExistsApprovedForUserEvent(ctx, userID, rnd.EventID)
+		eligible, err = s.registrations.ExistsApprovedForUserEvent(ctx, userID, rnd.EventID)
+		return eligible, false, err
 	}
 
 	prev, err := s.rounds.FindByEventAndOrder(ctx, rnd.EventID, rnd.RoundOrder-1)
 	if err != nil {
 		if errors.Is(err, round.ErrNotFound) {
-			return false, nil
+			return false, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
 
 	p, err := s.rounds.GetParticipant(ctx, prev.ID, userID)
 	if err != nil {
 		if errors.Is(err, round.ErrParticipantNotFound) {
-			return false, nil
+			return false, false, nil
 		}
-		return false, err
+		return false, false, err
 	}
-	return p.Status == round.ParticipantQualified, nil
+	return p.Status == round.ParticipantQualified, true, nil
 }
 
 // EnterRound is the real security gate behind POST /rounds/{id}/enter:
@@ -202,8 +205,15 @@ func (s *Service) EnterRound(ctx context.Context, roundID, userID string) (bool,
 	if rnd.Status != round.StatusOngoing {
 		return false, "round is not ongoing", nil
 	}
+	now := time.Now().UTC()
+	if now.Before(rnd.StartAt) {
+		return false, "round has not started yet", nil
+	}
+	if !now.Before(rnd.StartAt.Add(time.Duration(rnd.DurationMinutes) * time.Minute)) {
+		return false, "round has ended", nil
+	}
 
-	eligible, err := s.isEligibleForRound(ctx, userID, rnd)
+	eligible, _, err := s.isEligibleForRound(ctx, userID, rnd)
 	if err != nil {
 		return false, "", err
 	}
@@ -216,12 +226,14 @@ func (s *Service) EnterRound(ctx context.Context, roundID, userID string) (bool,
 	return true, "", nil
 }
 
-// YourStatus backs the public round listing's per-caller your_status:
-// an already-recorded decision is reported verbatim; otherwise it is one
-// of "not_eligible" (round 1, no approved registration), "waiting"
-// (round N>1, not yet qualified from the previous round), "ready"
-// (eligible, round ongoing, start_at passed) or "locked" (eligible, but
-// not yet time or the round isn't ongoing).
+// YourStatus backs the public round listing's per-caller your_status: an
+// already-recorded decision is reported verbatim; otherwise it is one of
+// "not_eligible" (round 1, no approved registration), "eliminated" (round
+// N>1, decided against the student in round N-1 — or eligible for this
+// round but it has ended with no decision recorded for them), "waiting"
+// (round N>1, round N-1 has no decision yet), "ready" (eligible, round
+// ongoing, start_at passed) or "locked" (eligible, but not yet time or the
+// round isn't ongoing).
 func (s *Service) YourStatus(ctx context.Context, userID string, rnd *round.Round) (string, error) {
 	p, err := s.rounds.GetParticipant(ctx, rnd.ID, userID)
 	if err == nil {
@@ -231,7 +243,7 @@ func (s *Service) YourStatus(ctx context.Context, userID string, rnd *round.Roun
 		return "", err
 	}
 
-	eligible, err := s.isEligibleForRound(ctx, userID, rnd)
+	eligible, priorDecided, err := s.isEligibleForRound(ctx, userID, rnd)
 	if err != nil {
 		return "", err
 	}
@@ -239,9 +251,15 @@ func (s *Service) YourStatus(ctx context.Context, userID string, rnd *round.Roun
 		if rnd.RoundOrder == 1 {
 			return "not_eligible", nil
 		}
+		if priorDecided {
+			return "eliminated", nil
+		}
 		return "waiting", nil
 	}
 
+	if rnd.Status == round.StatusEnded {
+		return "eliminated", nil
+	}
 	if rnd.Status == round.StatusOngoing && !time.Now().UTC().Before(rnd.StartAt) {
 		return "ready", nil
 	}
