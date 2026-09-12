@@ -24,6 +24,7 @@ func NewRouter(
 	importantDateHandler *handler.ImportantDateHandler,
 	registrationHandler *handler.RegistrationHandler,
 	notificationHandler *handler.NotificationHandler,
+	roundHandler *handler.RoundHandler,
 	jwtManager *jwt.Manager,
 	users user.Repository,
 	allowedOrigins []string,
@@ -111,8 +112,16 @@ func NewRouter(
 	r.Route("/api/client", func(r chi.Router) {
 		r.Use(appmw.RateLimitByIP(60, 20))
 		r.Get("/events", eventHandler.GetActiveEvent)
+		r.Get("/events/{id}", eventHandler.GetByID)
+		r.Get("/events/{eventID}/rounds", roundHandler.ListPublic)
 		r.Get("/notices", noticeHandler.ListPublic)
 		r.Get("/important-dates", importantDateHandler.ListPublic)
+
+		// The real entry gate for a round: a client-side countdown is
+		// never trusted. This is the one /api/client route that requires
+		// auth, so it opts in per-route rather than moving the whole
+		// group behind RequireAccessToken.
+		r.With(appmw.RequireAccessToken(jwtManager, users)).Post("/rounds/{roundID}/enter", roundHandler.EnterRound)
 	})
 
 	// Admin surface: every route requires a valid access token AND an
@@ -126,6 +135,21 @@ func NewRouter(
 			r.Post("/", eventHandler.Create)
 			r.Post("/upload", eventHandler.Upload)
 			r.Put("/{eventID}", eventHandler.Update)
+
+			r.Get("/{eventID}/rounds", roundHandler.ListAdmin)
+			r.Post("/{eventID}/rounds", roundHandler.Create)
+			r.Put("/{eventID}/rounds/{id}", roundHandler.Update)
+			r.Delete("/{eventID}/rounds/{id}", roundHandler.Delete)
+		})
+
+		// Round status transitions and the post-round decision workflow.
+		// Not nested under /events since a round is addressed by its own
+		// id from here on.
+		r.Route("/rounds", func(r chi.Router) {
+			r.Post("/{id}/start", roundHandler.Start)
+			r.Post("/{id}/end", roundHandler.End)
+			r.Get("/{id}/candidates", roundHandler.Candidates)
+			r.Put("/{id}/participants", roundHandler.SetParticipants)
 		})
 
 		r.Route("/notices", func(r chi.Router) {
@@ -144,6 +168,7 @@ func NewRouter(
 
 		r.Get("/users", adminHandler.ListUsers)
 		r.Put("/users/{id}/verify", adminHandler.VerifyUser)
+		r.Post("/users/{id}/admit-card", adminHandler.UploadAdmitCard)
 
 		// Exam-registration payment review queue, mirroring the KYC queue
 		// above: list by ?status=pending, then approve/reject each.

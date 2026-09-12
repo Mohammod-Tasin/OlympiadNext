@@ -11,9 +11,12 @@ is no phone/SMS auth — it was removed.
 
 Built so far: the auth/identity foundation, `student`/`admin` roles, admin-curated
 **events** (client-facing content blocks + image upload), an admin-curated
-bilingual **notice board**, and a manual **student verification (KYC)** flow
-(upload a proof document, admin approves/rejects).
-Contests, problems, submissions, and scoring are **not built yet**.
+bilingual **notice board**, a manual **student verification (KYC)** flow
+(upload a proof document, admin approves/rejects), and per-event **rounds**
+(Qualifying/Semifinal/Final by default, admin-renameable) that gate entry
+into the next round via a qualified/eliminated/winner decision.
+Contest problems, submissions, and scoring are **not built yet** — rounds
+only gate access to a future exam-taking flow.
 
 ## Commands
 
@@ -40,14 +43,15 @@ Layered, hand-wired dependency injection in `main.go` (no DI framework):
 main.go                      config → db connect+migrate → repos → services → handlers → router
 internal/config/             env loading, fails fast on missing secrets
 internal/domain/             entities + repository INTERFACES + sentinel errors
-  user/ token/ device/ email/ event/ notice/ registration/ sms/
+  user/ token/ device/ email/ event/ notice/ registration/ round/ sms/
 internal/auth/               service.go = all orchestration; sub-pkgs jwt/ hash/ google/ email/
 internal/app/events/         event service (admin content orchestration)
 internal/app/notices/        notice-board service (admin CRUD + public list)
 internal/app/registrations/  exam-registration payment + admit-card orchestration
+internal/app/rounds/         sequential event rounds: CRUD, start/end, entry gate, qualify/eliminate/winner
 internal/app/notify/         notification-channel preference, phone OTP, admit-card dispatch
 internal/repository/postgres/ implementations of the domain interfaces
-internal/http/               handler/ (auth, user, admin, event, notice, registration, notification) middleware/ dto/ response/
+internal/http/               handler/ (auth, user, admin, event, notice, registration, notification, round) middleware/ dto/ response/
 internal/platform/           db/ (+ embedded migrations/), email/ (SMTP), sms/ (BulkSMSBD), storage/ (local uploads)
 internal/server/router.go    the whole route table
 ```
@@ -77,12 +81,20 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `PUT /api/user/notification-preference` (`{method:"email"\|"phone", phone}`; phone sends an SMS OTP, channel stays `email` until verified) | access token |
 | `POST /api/user/notification-phone/verify-otp` (`{otp}`), `/notification-phone/resend-otp` (no body) | access token |
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`; `is_registered` reflects the caller's own exam registration when a valid access token is sent) | none (optional access token) |
+| `GET /api/client/events/{id}` (same shape as above, but any event by id — not only the currently active one) | none (optional access token) |
 | `GET /api/client/notices` (active notices only, `display_order` ASC; each row carries `text_en` + `text_bn`) | none |
 | `GET /api/client/important-dates` (active only, `event_date` ASC then `display_order` ASC; each row carries `event_date` as `YYYY-MM-DD`, `title`, `details_en`, `details_bn`) | none |
+| `GET /api/client/events/{eventID}/rounds` (rounds for an event, `round_order` ASC; adds a per-round `your_status` when a valid access token is sent) | none (optional access token) |
+| `POST /api/client/rounds/{roundID}/enter` (the real entry gate — never trust a client-side countdown; `200 {"allowed":true}` or `403 {"reason":"..."}`) | access token |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
+| `GET /api/admin/events/{eventID}/rounds` (same ordering as the client listing, no `your_status`), `POST /api/admin/events/{eventID}/rounds`, `PUT /api/admin/events/{eventID}/rounds/{id}`, `DELETE /api/admin/events/{eventID}/rounds/{id}` | access token + admin |
+| `POST /api/admin/rounds/{id}/start`, `/rounds/{id}/end` (forward-only `upcoming`→`ongoing`→`ended`) | access token + admin |
+| `GET /api/admin/rounds/{id}/candidates` (dynamic eligible list for the next decision; 409 unless the round has `ended`) | access token + admin |
+| `PUT /api/admin/rounds/{id}/participants` (bulk `[{"user_id","status"}]` upsert; `status:"winner"` only on the event's highest `round_order`; 409 unless the round has `ended`) | access token + admin |
 | `GET /api/admin/notices` (all notices, active or not), `POST /api/admin/notices`, `PUT /api/admin/notices/{id}` (`text_en`, `text_bn`, `display_order`, `is_active`), `DELETE /api/admin/notices/{id}` | access token + admin |
 | `GET /api/admin/important-dates` (all rows), `POST /api/admin/important-dates`, `PUT /api/admin/important-dates/{id}` (`event_date` `YYYY-MM-DD`, `title`, `details_en`, `details_bn`, `display_order`, `is_active`), `DELETE /api/admin/important-dates/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
+| `POST /api/admin/users/{id}/admit-card` (multipart `file`, PDF or image) | access token + admin |
 | `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
 | `POST /api/admin/registrations/{id}/admit-card` (multipart `file`, PDF only; 409 unless the registration is `approved`) | access token + admin |
 | `GET /uploads/*` (event images) | none |
@@ -142,7 +154,12 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   `is_registered` — a single `SELECT EXISTS` on `exam_registrations` for
   `user_id + event_id`, true for a row in any status — so the frontend
   can hide the payment form. A failed check logs and leaves the flag
-  `false` rather than failing the page.
+  `false` rather than failing the page. `GET /api/client/events/{id}`
+  shares this exact optional-auth `is_registered` behavior (factored into
+  `EventHandler.attachIsRegistered`) but fetches by id via
+  `event.Repository.FindByID` instead of `FindActive`, for pages (like the
+  rounds page) that need a specific event's details even when it is not
+  the platform's current active one.
 - **Admit cards.** Once a registration is `approved`, an admin uploads a
   PDF admit card via `POST /api/admin/registrations/{id}/admit-card`. It is
   stored under `uploads/admit-cards/<studentUserID>/`, only the path is
@@ -153,6 +170,30 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   a concurrent unreject cannot slip a card onto a non-approved row
   (`registration.ErrNotApproved` → 409). After a successful upload the
   student is notified on their chosen channel (see Notifications).
+- **Rounds.** An event has zero or more sequential `rounds`
+  (`round_order` 1, 2, 3…, `UNIQUE(event_id, round_order)`), each
+  `upcoming → ongoing → ended` — forward-only, enforced by a SQL
+  compare-and-swap (`round.Repository.SetStatus`) rather than app-side
+  branching, and moved only by the explicit `POST .../start` / `.../end`
+  endpoints (never a generic PATCH). Round-1 eligibility is an *approved*
+  `exam_registrations` row (`registration.ExistsApprovedForUserEvent` —
+  deliberately not the any-status `is_registered` flag above, since a
+  pending or rejected submission must not grant exam entry); round N>1
+  eligibility is a `qualified` row in `round_participants` for round N−1.
+  `POST /api/client/rounds/{id}/enter` is the only real gate — it
+  re-checks both the round's own `ongoing` status and that eligibility
+  server-side, because a client-side countdown can never be trusted; the
+  public listing's per-round `your_status` (`not_eligible` / `waiting` /
+  `locked` / `ready` / `qualified` / `eliminated` / `winner`) is informational
+  only. Once a round is `ended`, an admin pulls the dynamic candidate list
+  (`GET .../candidates` — round 1 from approved registrations, round N>1
+  from the previous round's `qualified` participants, each annotated with
+  its existing decision in *this* round if already decided) and records
+  decisions in bulk (`PUT .../participants`, upserted by `(round_id,
+  user_id)`); `status:"winner"` is rejected unless the round is the
+  event's highest `round_order`. Actual exam content (problems,
+  submissions, scoring) is out of scope — rounds only gate access for a
+  future exam-taking flow.
 - **Notifications & phone OTP.** `users.notification_method` (`email` default
   / `phone`) is the channel for transactional alerts (currently only the
   admit-card-ready message). A student opts into SMS with
@@ -187,7 +228,12 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   using `RequireAccessToken` — a browser can't put `X-Device-Fingerprint` on an
   `<img>`/download request, so the single-device gate would 401 every document view.
   It answers 401 only for a missing/invalid token and 403 for a valid token that is
-  neither the owner nor an admin.
+  neither the owner nor an admin. `users.admit_card_url` is a separate, general
+  per-student admit card an admin sets via `POST /api/admin/users/{id}/admit-card`
+  (multipart `file`, PDF or image, validated with `storage.ValidateDocument` — same
+  as `upload-file`); it is stored and gated through this same `uploads/users/<id>/`
+  path and exposed on `GET /api/auth/me`. It is independent of the per-registration
+  admit card described under "Admit cards" below.
 - **Profile completeness.** `middleware.RequireCompleteProfile` gates future
   non-auth routes on verified email, `verification_status = verified`, and full
   name/institution/level/medium. Deliberately not applied to `/api/auth/*` or
@@ -217,4 +263,3 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   over it.
 
 
-Before editing any file, always propose a plan first and wait for explicit approval — do not write code until the plan is approved, especially for anything touching auth, JWT, OTP, or KYC logic

@@ -86,6 +86,11 @@ type User struct {
 	ProfilePicture     *string
 	VerificationDoc    *string
 	VerificationStatus VerificationStatus
+	// AdmitCardURL is a general per-student admit card an admin uploads
+	// directly to the account, stored under the same uploads/users/<id>/
+	// folder as the KYC document. It is independent of the per-registration
+	// admit card on exam_registrations (see registration.Registration).
+	AdmitCardURL *string
 	// Notification delivery preference. NotificationPhoneOTP mirrors
 	// EmailOTP: the plaintext code last issued to prove NotificationPhone,
 	// nil once consumed. NotificationMethod only flips to 'phone' once

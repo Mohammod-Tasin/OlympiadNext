@@ -74,6 +74,18 @@ func (r *RegistrationRepository) ExistsForUserEvent(ctx context.Context, userID,
 	return exists, nil
 }
 
+// ExistsApprovedForUserEvent is ExistsForUserEvent narrowed to an approved
+// row, used for round-1 exam-entry eligibility.
+func (r *RegistrationRepository) ExistsApprovedForUserEvent(ctx context.Context, userID, eventID string) (bool, error) {
+	const q = `SELECT EXISTS (SELECT 1 FROM exam_registrations WHERE user_id = $1 AND event_id = $2 AND status = 'approved')`
+
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, q, userID, eventID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("registration_repository: exists approved for user/event failed: %w", err)
+	}
+	return exists, nil
+}
+
 func (r *RegistrationRepository) ListByUser(ctx context.Context, userID string) ([]*registration.Detail, error) {
 	const q = `
 		SELECT ` + registrationColumnsER + `, e.title

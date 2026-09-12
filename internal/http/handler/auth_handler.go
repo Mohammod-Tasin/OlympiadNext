@@ -156,6 +156,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		ProfilePicture:     u.ProfilePicture,
 		VerificationDoc:    u.VerificationDoc,
 		VerificationStatus: string(u.VerificationStatus),
+		AdmitCardURL:       u.AdmitCardURL,
 	})
 }
 

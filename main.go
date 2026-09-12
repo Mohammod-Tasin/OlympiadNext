@@ -17,6 +17,7 @@ import (
 	"olympiadnext/internal/app/notices"
 	"olympiadnext/internal/app/notify"
 	"olympiadnext/internal/app/registrations"
+	"olympiadnext/internal/app/rounds"
 	"olympiadnext/internal/auth"
 	"olympiadnext/internal/auth/google"
 	"olympiadnext/internal/auth/jwt"
@@ -85,7 +86,7 @@ func main() {
 	}
 
 	userHandler := handler.NewUserHandler(userRepo, fileStorage, jwtManager, log)
-	adminHandler := handler.NewAdminHandler(userRepo, log)
+	adminHandler := handler.NewAdminHandler(userRepo, fileStorage, log)
 
 	eventService := events.NewService(eventRepo, log)
 	registrationService := registrations.NewService(registrationRepo, eventRepo, log)
@@ -102,7 +103,11 @@ func main() {
 
 	registrationHandler := handler.NewRegistrationHandler(registrationService, fileStorage, notifyService, log)
 
-	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, noticeHandler, importantDateHandler, registrationHandler, notificationHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
+	roundRepo := postgres.NewRoundRepository(conn)
+	roundService := rounds.NewService(roundRepo, registrationRepo, log)
+	roundHandler := handler.NewRoundHandler(roundService, jwtManager, log)
+
+	router := server.NewRouter(authHandler, adminAuthHandler, userHandler, adminHandler, eventHandler, noticeHandler, importantDateHandler, registrationHandler, notificationHandler, roundHandler, jwtManager, userRepo, cfg.AllowedOrigins, fileStorage.Dir(), log)
 
 	srv := &http.Server{
 		Addr:    "0.0.0.0:" + cfg.Port,

@@ -34,6 +34,8 @@ type Repository interface {
 	ListUsers(ctx context.Context, status VerificationStatus, limit int) ([]*User, error)
 	// SetVerificationStatus records an admin's review decision.
 	SetVerificationStatus(ctx context.Context, userID string, status VerificationStatus) error
+	// SetAdmitCardURL records the path of an admin-uploaded admit card.
+	SetAdmitCardURL(ctx context.Context, userID, url string) error
 
 	// SetNotificationMethod sets the delivery channel directly. Used to
 	// switch back to 'email', which needs no verification.
