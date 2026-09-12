@@ -99,6 +99,11 @@ type Repository interface {
 	// flag on the client event view; the uq_exam_reg_user_event constraint
 	// means at most one such row can exist.
 	ExistsForUserEvent(ctx context.Context, userID, eventID string) (bool, error)
+	// ExistsApprovedForUserEvent is like ExistsForUserEvent but only
+	// counts an approved row. This is what "has an active registration"
+	// means for round-1 exam entry — a pending or rejected submission
+	// does not grant entry.
+	ExistsApprovedForUserEvent(ctx context.Context, userID, eventID string) (bool, error)
 	// ListByUser returns the caller's own registrations, newest first,
 	// each with its EventTitle populated.
 	ListByUser(ctx context.Context, userID string) ([]*Detail, error)

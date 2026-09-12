@@ -16,7 +16,7 @@ const pgUniqueViolation = "23505"
 
 // userColumns is the full projection scanned by scanUser, in struct-field
 // order. Every SELECT that feeds scanUser must use exactly this list.
-const userColumns = `id, email, full_name, password_hash, auth_provider, google_id, active_device_fingerprint, role, email_verified, email_otp, email_otp_expiry, institution_name, level, medium, profile_picture, verification_doc, verification_status, notification_method, notification_phone, notification_phone_verified, notification_phone_otp, notification_phone_otp_expiry, created_at, updated_at`
+const userColumns = `id, email, full_name, password_hash, auth_provider, google_id, active_device_fingerprint, role, email_verified, email_otp, email_otp_expiry, institution_name, level, medium, profile_picture, verification_doc, verification_status, notification_method, notification_phone, notification_phone_verified, notification_phone_otp, notification_phone_otp_expiry, admit_card_url, created_at, updated_at`
 
 type UserRepository struct {
 	db *sql.DB
@@ -214,6 +214,16 @@ func (r *UserRepository) SetVerificationStatus(ctx context.Context, userID strin
 	return checkRowsAffected(res)
 }
 
+// SetAdmitCardURL records the path of an admin-uploaded admit card.
+func (r *UserRepository) SetAdmitCardURL(ctx context.Context, userID, url string) error {
+	const q = `UPDATE users SET admit_card_url = $1, updated_at = now() WHERE id = $2`
+	res, err := r.db.ExecContext(ctx, q, url, userID)
+	if err != nil {
+		return fmt.Errorf("user_repository: set admit card url failed: %w", err)
+	}
+	return checkRowsAffected(res)
+}
+
 // SetNotificationMethod sets the delivery channel directly (used for the
 // no-verification switch back to 'email').
 func (r *UserRepository) SetNotificationMethod(ctx context.Context, userID string, method user.NotificationMethod) error {
@@ -277,7 +287,7 @@ func scanUser(s rowScanner) (*user.User, error) {
 		&u.InstitutionName, &u.Level, &u.Medium, &u.ProfilePicture, &u.VerificationDoc,
 		&u.VerificationStatus, &u.NotificationMethod, &u.NotificationPhone,
 		&u.NotificationPhoneVerified, &u.NotificationPhoneOTP, &u.NotificationPhoneOTPExpiry,
-		&u.CreatedAt, &u.UpdatedAt,
+		&u.AdmitCardURL, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, user.ErrNotFound

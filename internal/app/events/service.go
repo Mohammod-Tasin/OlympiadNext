@@ -118,3 +118,9 @@ func (s *Service) UpdateEvent(ctx context.Context, id string, in Input) (*event.
 func (s *Service) GetActiveEvent(ctx context.Context) (*event.Event, error) {
 	return s.events.FindActive(ctx)
 }
+
+// GetEvent returns a single event by id, regardless of its active status.
+// Returns event.ErrNotFound when the id does not exist. Public.
+func (s *Service) GetEvent(ctx context.Context, id string) (*event.Event, error) {
+	return s.events.FindByID(ctx, id)
+}

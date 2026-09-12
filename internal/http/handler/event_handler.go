@@ -53,19 +53,47 @@ func (h *EventHandler) GetActiveEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := toEventResponse(e)
+	h.attachIsRegistered(r, &resp, e.ID)
+	response.JSON(w, http.StatusOK, resp)
+}
 
-	if claims, err := h.jwt.ParseAccessToken(middleware.ExtractBearerToken(r.Header.Get("Authorization"))); err == nil {
-		registered, err := h.registrations.IsRegistered(r.Context(), claims.UserID, e.ID)
-		if err != nil {
-			// A failed check should not hide the event; log and leave the
-			// flag false rather than 500 the whole page.
-			h.log.Error("client event: is-registered check failed", "user_id", claims.UserID, "event_id", e.ID, "error", err)
-		} else {
-			resp.IsRegistered = registered
-		}
+// GetByID handles GET /api/client/events/{id}: a single event by id,
+// regardless of whether it is the platform's current active one. Same
+// response shape and optional-auth is_registered behavior as
+// GetActiveEvent.
+func (h *EventHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		response.Error(w, http.StatusBadRequest, "event id is required")
+		return
 	}
 
+	e, err := h.events.GetEvent(r.Context(), id)
+	if err != nil {
+		h.handleEventError(w, err)
+		return
+	}
+
+	resp := toEventResponse(e)
+	h.attachIsRegistered(r, &resp, e.ID)
 	response.JSON(w, http.StatusOK, resp)
+}
+
+// attachIsRegistered fills resp.IsRegistered when the request carries a
+// valid access token, shared by GetActiveEvent and GetByID. A failed
+// check should not hide the event; it logs and leaves the flag false
+// rather than 500 the whole page.
+func (h *EventHandler) attachIsRegistered(r *http.Request, resp *dto.EventResponse, eventID string) {
+	claims, err := h.jwt.ParseAccessToken(middleware.ExtractBearerToken(r.Header.Get("Authorization")))
+	if err != nil {
+		return
+	}
+	registered, err := h.registrations.IsRegistered(r.Context(), claims.UserID, eventID)
+	if err != nil {
+		h.log.Error("client event: is-registered check failed", "user_id", claims.UserID, "event_id", eventID, "error", err)
+		return
+	}
+	resp.IsRegistered = registered
 }
 
 // Create handles POST /api/admin/events (admin-gated by middleware).
