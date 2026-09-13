@@ -48,16 +48,22 @@ func (f fakeRegRepo) ExistsApprovedForUserEvent(ctx context.Context, userID, eve
 	return f.existsApproved(ctx, userID, eventID)
 }
 
-// fakeUserRepo always returns a user at testLevel, so isEligibleForRound's
-// level check passes for every test round below (which also default to
-// testLevel via testRound).
+// fakeUserRepo always returns a user at testLevel with a 'verified'
+// status, so isEligibleForRound's level and verification checks pass for
+// every test round below (which also default to testLevel via testRound)
+// unless a test overrides verificationStatus to exercise the KYC gate.
 type fakeUserRepo struct {
 	user.Repository
+	verificationStatus user.VerificationStatus
 }
 
 func (f fakeUserRepo) FindByID(ctx context.Context, id string) (*user.User, error) {
 	level := testLevel
-	return &user.User{ID: id, Level: &level}, nil
+	status := f.verificationStatus
+	if status == "" {
+		status = user.VerificationVerified
+	}
+	return &user.User{ID: id, Level: &level, VerificationStatus: status}, nil
 }
 
 // testRound fills in Level: testLevel alongside the given fields, so every
@@ -145,6 +151,35 @@ func TestEnterRound_DeniesLevelMismatch(t *testing.T) {
 		t.Fatalf("expected entry to be denied for a level mismatch")
 	}
 	if want := "this round is only open to Secondary students"; reason != want {
+		t.Fatalf("reason = %q, want %q", reason, want)
+	}
+}
+
+func TestEnterRound_DeniesUnverifiedIdentity(t *testing.T) {
+	// Level matches and the registration is approved, but the student's
+	// KYC review is still 'pending' (e.g. reset by a later level/
+	// institution change) — must be denied with a verification-specific
+	// reason, not the generic "no active registration" message.
+	now := time.Now().UTC()
+	rnd := testRound(round.Round{
+		ID: "r1", EventID: "e1", RoundOrder: 1,
+		Status: round.StatusOngoing, StartAt: now.Add(-10 * time.Minute), DurationMinutes: 60,
+	})
+	svc := NewService(
+		fakeRoundRepo{findByID: func(_ context.Context, _ string) (*round.Round, error) { return rnd, nil }},
+		fakeRegRepo{existsApproved: func(_ context.Context, _, _ string) (bool, error) { return true, nil }},
+		fakeUserRepo{verificationStatus: user.VerificationPending},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+
+	allowed, reason, err := svc.EnterRound(context.Background(), "r1", "u1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if allowed {
+		t.Fatalf("expected entry to be denied for an unverified identity")
+	}
+	if want := "your identity verification is still under review"; reason != want {
 		t.Fatalf("reason = %q, want %q", reason, want)
 	}
 }

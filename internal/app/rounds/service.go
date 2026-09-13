@@ -261,19 +261,27 @@ func (s *Service) EndRound(ctx context.Context, id string) (*round.Round, error)
 // isEligibleForRound reports whether userID may enter rnd, independent of
 // rnd's own status/timing: the caller's users.level must match rnd.Level
 // (a Junior student is never eligible for a Secondary round, however
-// otherwise-qualified); given a level match, round 1 requires an approved
-// event registration, and round N>1 requires a 'qualified' decision in
-// that same level's round N-1. The second return value, priorDecided,
-// tells YourStatus whether an ineligible round N>1 is ineligible because
-// round N-1 was decided against the student (true) or because round N-1
-// has no decision yet (false); it is meaningless when eligible is true,
-// RoundOrder is 1, or the level does not match.
+// otherwise-qualified), and the caller's KYC identity review
+// (users.verification_status) must be 'verified' — payment approval and
+// identity verification are separate concerns, and a student whose
+// verification was reset to 'pending' (e.g. by a later level/institution
+// change) must not keep exam access on the strength of an old approval.
+// Given both checks pass, round 1 requires an approved event
+// registration, and round N>1 requires a 'qualified' decision in that
+// same level's round N-1. The second return value, priorDecided, tells
+// YourStatus whether an ineligible round N>1 is ineligible because round
+// N-1 was decided against the student (true) or because round N-1 has no
+// decision yet (false); it is meaningless when eligible is true,
+// RoundOrder is 1, or the level/verification checks failed.
 func (s *Service) isEligibleForRound(ctx context.Context, userID string, rnd *round.Round) (eligible bool, priorDecided bool, err error) {
 	usr, err := s.users.FindByID(ctx, userID)
 	if err != nil {
 		return false, false, err
 	}
 	if usr.Level == nil || *usr.Level != rnd.Level {
+		return false, false, nil
+	}
+	if usr.VerificationStatus != user.VerificationVerified {
 		return false, false, nil
 	}
 
@@ -303,10 +311,16 @@ func (s *Service) isEligibleForRound(ctx context.Context, userID string, rnd *ro
 // EnterRound is the real security gate behind POST /rounds/{id}/enter:
 // never trust a client-side countdown. It returns (false, reason, nil)
 // for every ineligible case and only a non-nil err for an unknown round
-// or an infrastructure failure. The level check is deliberately explicit
-// here (rather than relying solely on isEligibleForRound's own check)
-// so a level mismatch gets its own clear reason string, not a misleading
-// "no active registration"/"not qualified" message.
+// or an infrastructure failure. The level and verification checks are
+// deliberately explicit here (rather than relying solely on
+// isEligibleForRound's own boolean-only check) so each gets its own clear
+// reason string, not a misleading "no active registration"/"not
+// qualified" message. The verification check applies uniformly to every
+// round, not just round 1: a student who was verified and qualified out
+// of round 1, then later changed level/institution (resetting them to
+// 'pending'), must be blocked here again before entering round 2 — this
+// re-checks the caller's *current* status on every entry attempt rather
+// than trusting an earlier round's approval to still hold.
 func (s *Service) EnterRound(ctx context.Context, roundID, userID string) (bool, string, error) {
 	rnd, err := s.rounds.FindByID(ctx, roundID)
 	if err != nil {
@@ -319,6 +333,9 @@ func (s *Service) EnterRound(ctx context.Context, roundID, userID string) (bool,
 	}
 	if usr.Level == nil || *usr.Level != rnd.Level {
 		return false, fmt.Sprintf("this round is only open to %s students", rnd.Level), nil
+	}
+	if usr.VerificationStatus != user.VerificationVerified {
+		return false, "your identity verification is still under review", nil
 	}
 
 	if rnd.Status != round.StatusOngoing {
