@@ -124,3 +124,9 @@ func (s *Service) GetActiveEvent(ctx context.Context) (*event.Event, error) {
 func (s *Service) GetEvent(ctx context.Context, id string) (*event.Event, error) {
 	return s.events.FindByID(ctx, id)
 }
+
+// ListEvents returns every event, active or not, for the public
+// multi-event listing. A pure read — no validation to apply. Public.
+func (s *Service) ListEvents(ctx context.Context) ([]*event.Event, error) {
+	return s.events.ListAll(ctx)
+}

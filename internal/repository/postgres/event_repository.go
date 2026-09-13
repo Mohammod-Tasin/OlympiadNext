@@ -67,6 +67,38 @@ func (r *EventRepository) FindActive(ctx context.Context) (*event.Event, error) 
 	return r.scanOne(r.db.QueryRowContext(ctx, q))
 }
 
+// ListAll returns every event for the public multi-event listing. Ordered
+// is_active DESC first — a currently open event is what a student most
+// wants to see — then event_date DESC within each group, matching
+// FindActive's own tiebreak. There is no other status field to order by
+// (an event is never "past" or "upcoming" in the schema, only active or
+// not), so this is the most useful ordering available today.
+func (r *EventRepository) ListAll(ctx context.Context) ([]*event.Event, error) {
+	const q = `
+		SELECT ` + eventColumns + `
+		FROM events
+		ORDER BY is_active DESC, event_date DESC`
+
+	rows, err := r.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("event_repository: list all failed: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*event.Event
+	for rows.Next() {
+		var e event.Event
+		if err := rows.Scan(&e.ID, &e.Title, &e.Description, &e.ImageURL, &e.EventDate, &e.IsActive, &e.BkashNumber, &e.NagadNumber, &e.RegistrationFee, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("event_repository: list all scan failed: %w", err)
+		}
+		out = append(out, &e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("event_repository: list all iteration failed: %w", err)
+	}
+	return out, nil
+}
+
 func (r *EventRepository) scanOne(row *sql.Row) (*event.Event, error) {
 	var e event.Event
 	err := row.Scan(&e.ID, &e.Title, &e.Description, &e.ImageURL, &e.EventDate, &e.IsActive, &e.BkashNumber, &e.NagadNumber, &e.RegistrationFee, &e.CreatedAt, &e.UpdatedAt)

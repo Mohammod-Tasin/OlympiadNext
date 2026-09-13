@@ -81,6 +81,7 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `PUT /api/user/notification-preference` (`{method:"email"\|"phone", phone}`; phone sends an SMS OTP, channel stays `email` until verified) | access token |
 | `POST /api/user/notification-phone/verify-otp` (`{otp}`), `/notification-phone/resend-otp` (no body) | access token |
 | `GET /api/client/events` (includes per-event `bkash_number`, `nagad_number`, `registration_fee`; `is_registered` reflects the caller's own exam registration when a valid access token is sent) | none (optional access token) |
+| `GET /api/client/events/all` (every event, active or not, ordered `is_active` DESC then `event_date` DESC; `{"events": [...], "count": N}`, same per-event shape as above but `is_registered` is always `false` — fully public, no optional-auth lookup) | none |
 | `GET /api/client/events/{id}` (same shape as above, but any event by id — not only the currently active one) | none (optional access token) |
 | `GET /api/client/notices` (active notices only, `display_order` ASC; each row carries `text_en` + `text_bn`) | none |
 | `GET /api/client/important-dates` (active only, `event_date` ASC then `display_order` ASC; each row carries `event_date` as `YYYY-MM-DD`, `title`, `details_en`, `details_bn`) | none |
@@ -159,7 +160,16 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   `EventHandler.attachIsRegistered`) but fetches by id via
   `event.Repository.FindByID` instead of `FindActive`, for pages (like the
   rounds page) that need a specific event's details even when it is not
-  the platform's current active one.
+  the platform's current active one. `GET /api/client/events/all` is a
+  separate, additive listing for a future events-listing page — it does
+  not replace the single-active-event route the homepage hero uses.
+  `event.Repository.ListAll` orders `is_active` DESC then `event_date`
+  DESC: an event has no "past"/"upcoming" status field beyond `is_active`,
+  so surfacing whatever is currently open first, then most recent by date,
+  is the only ordering with real meaning today. It never attempts the
+  optional-auth `is_registered` lookup `GetActiveEvent`/`GetByID` do — the
+  route is unauthenticated and every list row reports `is_registered:
+  false`.
 - **Admit cards.** Once a registration is `approved`, an admin uploads a
   PDF admit card via `POST /api/admin/registrations/{id}/admit-card`. It is
   stored under `uploads/admit-cards/<studentUserID>/`, only the path is
