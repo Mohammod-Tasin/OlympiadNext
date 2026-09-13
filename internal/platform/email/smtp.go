@@ -21,7 +21,7 @@ import (
 // indefinitely (observed on Render).
 const dialTimeout = 8 * time.Second
 
-const otpEmailSubject = "Your OlympiadNext Verification Code"
+const otpEmailSubject = "Your Shikhor Verification Code"
 
 type SMTPClient struct {
 	host     string
@@ -167,7 +167,7 @@ func otpEmailHTML(code string) string {
 <html>
   <body style="font-family: Arial, sans-serif; background-color: #f4f4f7; padding: 24px; margin: 0;">
     <div style="max-width: 480px; margin: 0 auto; background: #ffffff; border-radius: 8px; padding: 32px; text-align: center;">
-      <h2 style="color: #1a1a1a; margin-bottom: 8px;">OlympiadNext Verification</h2>
+      <h2 style="color: #1a1a1a; margin-bottom: 8px;">Shikhor Verification</h2>
       <p style="color: #555555; margin-bottom: 24px;">Use the code below to verify your email address. It expires in 5 minutes.</p>
       <div style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1a73e8; background: #f0f4ff; padding: 16px 24px; border-radius: 6px; display: inline-block;">%s</div>
       <p style="color: #999999; margin-top: 24px; font-size: 12px;">If you did not request this code, you can safely ignore this email.</p>
