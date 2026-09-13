@@ -18,12 +18,23 @@ import (
 
 	"olympiadnext/internal/domain/registration"
 	"olympiadnext/internal/domain/round"
+	"olympiadnext/internal/domain/user"
 )
 
 // ErrValidation is returned when caller-supplied round or participant
 // data is incomplete or malformed. Callers should map it to a 400
 // response.
 var ErrValidation = errors.New("rounds: invalid round data")
+
+// allowedLevels mirrors internal/http/handler/profile_fields.go's own
+// allowedLevels exactly (the same three values users.level enforces). It
+// is duplicated rather than imported to avoid an app-layer package
+// depending on the http/handler layer; both lists must be kept in sync.
+var allowedLevels = map[string]bool{
+	"Junior":           true,
+	"Secondary":        true,
+	"Higher Secondary": true,
+}
 
 // Input is the mutable state of a round, supplied by an admin on both
 // create and update. Status is deliberately absent: it only moves via the
@@ -33,10 +44,13 @@ type Input struct {
 	RoundName       string
 	StartAt         time.Time
 	DurationMinutes int
-	// IsFinal marks this as the event's one final round. At most one round
-	// per event may set this — checked in CreateRound/UpdateRound before
-	// the DB constraint would reject it.
+	// IsFinal marks this as the event's one final round for its Level. At
+	// most one round per (event, level) may set this — checked in
+	// CreateRound/UpdateRound before the DB constraint would reject it.
 	IsFinal bool
+	// Level scopes this round to one academic level; must be one of
+	// allowedLevels.
+	Level string
 }
 
 func (in Input) validate() error {
@@ -51,6 +65,9 @@ func (in Input) validate() error {
 	}
 	if in.DurationMinutes <= 0 {
 		return fmt.Errorf("%w: duration_minutes must be greater than zero", ErrValidation)
+	}
+	if !allowedLevels[in.Level] {
+		return fmt.Errorf("%w: level must be one of: Junior, Secondary, Higher Secondary", ErrValidation)
 	}
 	return nil
 }
@@ -79,11 +96,12 @@ type Candidate struct {
 type Service struct {
 	rounds        round.Repository
 	registrations registration.Repository
+	users         user.Repository
 	log           *slog.Logger
 }
 
-func NewService(rounds round.Repository, registrations registration.Repository, log *slog.Logger) *Service {
-	return &Service{rounds: rounds, registrations: registrations, log: log}
+func NewService(rounds round.Repository, registrations registration.Repository, users user.Repository, log *slog.Logger) *Service {
+	return &Service{rounds: rounds, registrations: registrations, users: users, log: log}
 }
 
 // CreateRound persists a new round for an event, always starting
@@ -93,7 +111,7 @@ func (s *Service) CreateRound(ctx context.Context, eventID string, in Input) (*r
 		return nil, err
 	}
 	if in.IsFinal {
-		if err := s.checkNoOtherFinal(ctx, eventID, ""); err != nil {
+		if err := s.checkNoOtherFinal(ctx, eventID, in.Level, ""); err != nil {
 			return nil, err
 		}
 	}
@@ -105,16 +123,17 @@ func (s *Service) CreateRound(ctx context.Context, eventID string, in Input) (*r
 		StartAt:         in.StartAt,
 		DurationMinutes: in.DurationMinutes,
 		IsFinal:         in.IsFinal,
+		Level:           in.Level,
 	}
 	if err := s.rounds.Create(ctx, rnd); err != nil {
 		return nil, err
 	}
 
-	s.log.Info("round created", "round_id", rnd.ID, "event_id", eventID, "round_order", rnd.RoundOrder, "is_final", rnd.IsFinal)
+	s.log.Info("round created", "round_id", rnd.ID, "event_id", eventID, "round_order", rnd.RoundOrder, "is_final", rnd.IsFinal, "level", rnd.Level)
 	return rnd, nil
 }
 
-// UpdateRound replaces the order/name/start/duration/is_final of an
+// UpdateRound replaces the order/name/start/duration/is_final/level of an
 // existing round. Returns round.ErrNotFound when the id does not exist.
 // Admin-only at the transport layer.
 func (s *Service) UpdateRound(ctx context.Context, id string, in Input) (*round.Round, error) {
@@ -128,7 +147,7 @@ func (s *Service) UpdateRound(ctx context.Context, id string, in Input) (*round.
 	}
 
 	if in.IsFinal {
-		if err := s.checkNoOtherFinal(ctx, existing.EventID, existing.ID); err != nil {
+		if err := s.checkNoOtherFinal(ctx, existing.EventID, in.Level, existing.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -138,20 +157,21 @@ func (s *Service) UpdateRound(ctx context.Context, id string, in Input) (*round.
 	existing.StartAt = in.StartAt
 	existing.DurationMinutes = in.DurationMinutes
 	existing.IsFinal = in.IsFinal
+	existing.Level = in.Level
 
 	if err := s.rounds.Update(ctx, existing); err != nil {
 		return nil, err
 	}
 
-	s.log.Info("round updated", "round_id", existing.ID, "is_final", existing.IsFinal)
+	s.log.Info("round updated", "round_id", existing.ID, "is_final", existing.IsFinal, "level", existing.Level)
 	return existing, nil
 }
 
-// checkNoOtherFinal returns a friendly ErrValidation when eventID already
-// has a round marked final other than excludeID, so the error surfaces as
-// a 400 before the uq_rounds_one_final_per_event constraint would reject
-// it as a raw DB conflict.
-func (s *Service) checkNoOtherFinal(ctx context.Context, eventID, excludeID string) error {
+// checkNoOtherFinal returns a friendly ErrValidation when (eventID, level)
+// already has a round marked final other than excludeID, so the error
+// surfaces as a 400 before the uq_rounds_one_final_per_event constraint
+// would reject it as a raw DB conflict.
+func (s *Service) checkNoOtherFinal(ctx context.Context, eventID, level, excludeID string) error {
 	existing, err := s.rounds.ListByEvent(ctx, eventID)
 	if err != nil {
 		return err
@@ -160,8 +180,8 @@ func (s *Service) checkNoOtherFinal(ctx context.Context, eventID, excludeID stri
 		if r.ID == excludeID {
 			continue
 		}
-		if r.IsFinal {
-			return fmt.Errorf("%w: only one final round allowed per event", ErrValidation)
+		if r.Level == level && r.IsFinal {
+			return fmt.Errorf("%w: only one final round allowed per level per event", ErrValidation)
 		}
 	}
 	return nil
@@ -176,10 +196,44 @@ func (s *Service) DeleteRound(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListRoundsByEvent returns every round for an event, ordered by
-// round_order. Public.
+// ListRoundsByEvent returns every round for an event across all levels,
+// ordered by round_order. Used by the admin listing, which manages all
+// three levels' rounds from the same event — never filtered.
 func (s *Service) ListRoundsByEvent(ctx context.Context, eventID string) ([]*round.Round, error) {
 	return s.rounds.ListByEvent(ctx, eventID)
+}
+
+// ListRoundsByEventForCaller backs the public listing: an anonymous
+// caller (callerUserID == "") sees every round across all levels —
+// informational only, since entry is gated separately and there is no
+// per-user state to protect here. An authenticated caller only sees
+// rounds matching their own users.level; a caller with no level on file
+// yet (onboarding incomplete) also sees everything rather than an
+// unhelpful empty list.
+func (s *Service) ListRoundsByEventForCaller(ctx context.Context, eventID, callerUserID string) ([]*round.Round, error) {
+	all, err := s.rounds.ListByEvent(ctx, eventID)
+	if err != nil {
+		return nil, err
+	}
+	if callerUserID == "" {
+		return all, nil
+	}
+
+	usr, err := s.users.FindByID(ctx, callerUserID)
+	if err != nil {
+		return nil, err
+	}
+	if usr.Level == nil {
+		return all, nil
+	}
+
+	filtered := make([]*round.Round, 0, len(all))
+	for _, r := range all {
+		if r.Level == *usr.Level {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
 }
 
 // StartRound moves a round from 'upcoming' to 'ongoing'. Returns
@@ -205,19 +259,30 @@ func (s *Service) EndRound(ctx context.Context, id string) (*round.Round, error)
 }
 
 // isEligibleForRound reports whether userID may enter rnd, independent of
-// rnd's own status/timing: round 1 requires an approved event
-// registration; round N>1 requires a 'qualified' decision in round N-1. The
-// second return value, priorDecided, tells YourStatus whether an
-// ineligible round N>1 is ineligible because round N-1 was decided against
-// the student (true) or because round N-1 has no decision yet (false); it
-// is meaningless when eligible is true or RoundOrder is 1.
+// rnd's own status/timing: the caller's users.level must match rnd.Level
+// (a Junior student is never eligible for a Secondary round, however
+// otherwise-qualified); given a level match, round 1 requires an approved
+// event registration, and round N>1 requires a 'qualified' decision in
+// that same level's round N-1. The second return value, priorDecided,
+// tells YourStatus whether an ineligible round N>1 is ineligible because
+// round N-1 was decided against the student (true) or because round N-1
+// has no decision yet (false); it is meaningless when eligible is true,
+// RoundOrder is 1, or the level does not match.
 func (s *Service) isEligibleForRound(ctx context.Context, userID string, rnd *round.Round) (eligible bool, priorDecided bool, err error) {
+	usr, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return false, false, err
+	}
+	if usr.Level == nil || *usr.Level != rnd.Level {
+		return false, false, nil
+	}
+
 	if rnd.RoundOrder == 1 {
 		eligible, err = s.registrations.ExistsApprovedForUserEvent(ctx, userID, rnd.EventID)
 		return eligible, false, err
 	}
 
-	prev, err := s.rounds.FindByEventAndOrder(ctx, rnd.EventID, rnd.RoundOrder-1)
+	prev, err := s.rounds.FindByEventAndOrder(ctx, rnd.EventID, rnd.Level, rnd.RoundOrder-1)
 	if err != nil {
 		if errors.Is(err, round.ErrNotFound) {
 			return false, false, nil
@@ -238,12 +303,24 @@ func (s *Service) isEligibleForRound(ctx context.Context, userID string, rnd *ro
 // EnterRound is the real security gate behind POST /rounds/{id}/enter:
 // never trust a client-side countdown. It returns (false, reason, nil)
 // for every ineligible case and only a non-nil err for an unknown round
-// or an infrastructure failure.
+// or an infrastructure failure. The level check is deliberately explicit
+// here (rather than relying solely on isEligibleForRound's own check)
+// so a level mismatch gets its own clear reason string, not a misleading
+// "no active registration"/"not qualified" message.
 func (s *Service) EnterRound(ctx context.Context, roundID, userID string) (bool, string, error) {
 	rnd, err := s.rounds.FindByID(ctx, roundID)
 	if err != nil {
 		return false, "", err
 	}
+
+	usr, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return false, "", err
+	}
+	if usr.Level == nil || *usr.Level != rnd.Level {
+		return false, fmt.Sprintf("this round is only open to %s students", rnd.Level), nil
+	}
+
 	if rnd.Status != round.StatusOngoing {
 		return false, "round is not ongoing", nil
 	}
@@ -336,7 +413,7 @@ func (s *Service) GetCandidates(ctx context.Context, roundID string) ([]Candidat
 			candidates = append(candidates, Candidate{UserID: d.UserID, FullName: d.StudentName, Email: d.StudentEmail})
 		}
 	} else {
-		prev, err := s.rounds.FindByEventAndOrder(ctx, rnd.EventID, rnd.RoundOrder-1)
+		prev, err := s.rounds.FindByEventAndOrder(ctx, rnd.EventID, rnd.Level, rnd.RoundOrder-1)
 		if err != nil && !errors.Is(err, round.ErrNotFound) {
 			return nil, err
 		}

@@ -11,10 +11,14 @@ import (
 )
 
 // Prize is one named reward tier for an inclusive range of final-round
-// ranks. PrizeDescription is optional (the DB column is nullable).
+// ranks. PrizeDescription is optional (the DB column is nullable). Level
+// scopes the tier to one of the three academic levels ("Junior",
+// "Secondary", "Higher Secondary") — two levels may configure identical
+// or overlapping rank ranges without conflict.
 type Prize struct {
 	ID               string
 	EventID          string
+	Level            string
 	RankFrom         int
 	RankTo           int
 	PrizeName        string

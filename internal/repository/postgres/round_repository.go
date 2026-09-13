@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	roundColumns       = `id, event_id, round_order, round_name, start_at, duration_minutes, status, is_final, created_at, updated_at`
+	roundColumns       = `id, event_id, round_order, round_name, start_at, duration_minutes, status, is_final, level, created_at, updated_at`
 	participantColumns = `id, round_id, user_id, status, rank, decided_at`
 )
 
@@ -26,11 +26,11 @@ func NewRoundRepository(db *sql.DB) *RoundRepository {
 
 func (r *RoundRepository) Create(ctx context.Context, rnd *round.Round) error {
 	const q = `
-		INSERT INTO rounds (id, event_id, round_order, round_name, start_at, duration_minutes, status, is_final, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'upcoming', $6, now(), now())
+		INSERT INTO rounds (id, event_id, round_order, round_name, start_at, duration_minutes, status, is_final, level, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'upcoming', $6, $7, now(), now())
 		RETURNING id, status, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, rnd.EventID, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.IsFinal).
+	err := r.db.QueryRowContext(ctx, q, rnd.EventID, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.IsFinal, rnd.Level).
 		Scan(&rnd.ID, &rnd.Status, &rnd.CreatedAt, &rnd.UpdatedAt)
 	if err != nil {
 		if isDuplicateRoundOrder(err) {
@@ -47,11 +47,11 @@ func (r *RoundRepository) Create(ctx context.Context, rnd *round.Round) error {
 func (r *RoundRepository) Update(ctx context.Context, rnd *round.Round) error {
 	const q = `
 		UPDATE rounds
-		SET round_order = $1, round_name = $2, start_at = $3, duration_minutes = $4, is_final = $5, updated_at = now()
-		WHERE id = $6
+		SET round_order = $1, round_name = $2, start_at = $3, duration_minutes = $4, is_final = $5, level = $6, updated_at = now()
+		WHERE id = $7
 		RETURNING updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.IsFinal, rnd.ID).
+	err := r.db.QueryRowContext(ctx, q, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.IsFinal, rnd.Level, rnd.ID).
 		Scan(&rnd.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return round.ErrNotFound
@@ -82,9 +82,9 @@ func (r *RoundRepository) FindByID(ctx context.Context, id string) (*round.Round
 	return scanRound(r.db.QueryRowContext(ctx, q, id))
 }
 
-func (r *RoundRepository) FindByEventAndOrder(ctx context.Context, eventID string, order int) (*round.Round, error) {
-	const q = `SELECT ` + roundColumns + ` FROM rounds WHERE event_id = $1 AND round_order = $2`
-	return scanRound(r.db.QueryRowContext(ctx, q, eventID, order))
+func (r *RoundRepository) FindByEventAndOrder(ctx context.Context, eventID, level string, order int) (*round.Round, error) {
+	const q = `SELECT ` + roundColumns + ` FROM rounds WHERE event_id = $1 AND level = $2 AND round_order = $3`
+	return scanRound(r.db.QueryRowContext(ctx, q, eventID, level, order))
 }
 
 func (r *RoundRepository) ListByEvent(ctx context.Context, eventID string) ([]*round.Round, error) {
@@ -247,7 +247,7 @@ func isDuplicateRank(err error) bool {
 
 func scanRound(s rowScanner) (*round.Round, error) {
 	var rnd round.Round
-	err := s.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.IsFinal, &rnd.CreatedAt, &rnd.UpdatedAt)
+	err := s.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.IsFinal, &rnd.Level, &rnd.CreatedAt, &rnd.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, round.ErrNotFound
 	}
@@ -259,7 +259,7 @@ func scanRound(s rowScanner) (*round.Round, error) {
 
 func scanRoundRow(rows *sql.Rows) (*round.Round, error) {
 	var rnd round.Round
-	if err := rows.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.IsFinal, &rnd.CreatedAt, &rnd.UpdatedAt); err != nil {
+	if err := rows.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.IsFinal, &rnd.Level, &rnd.CreatedAt, &rnd.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("round_repository: scan row failed: %w", err)
 	}
 	return &rnd, nil

@@ -29,9 +29,11 @@ func NewRoundHandler(roundService *rounds.Service, jwtManager *jwt.Manager, log 
 
 // ListPublic handles GET /api/client/events/{eventID}/rounds: every round
 // for the event, ordered by round_order. The route is public, but when
-// the request carries a valid access token each round also reports the
-// caller's your_status, mirroring EventHandler.GetActiveEvent's
-// optional-auth pattern.
+// the request carries a valid access token the response is filtered to
+// the caller's own Level (see rounds.Service.ListRoundsByEventForCaller)
+// and each round also reports the caller's your_status, mirroring
+// EventHandler.GetActiveEvent's optional-auth pattern. An anonymous
+// caller sees every level's rounds — informational only.
 func (h *RoundHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 	eventID := strings.TrimSpace(chi.URLParam(r, "eventID"))
 	if eventID == "" {
@@ -39,15 +41,15 @@ func (h *RoundHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := h.rounds.ListRoundsByEvent(r.Context(), eventID)
-	if err != nil {
-		h.handleRoundError(w, err)
-		return
-	}
-
 	var userID string
 	if claims, err := h.jwt.ParseAccessToken(middleware.ExtractBearerToken(r.Header.Get("Authorization"))); err == nil {
 		userID = claims.UserID
+	}
+
+	list, err := h.rounds.ListRoundsByEventForCaller(r.Context(), eventID, userID)
+	if err != nil {
+		h.handleRoundError(w, err)
+		return
 	}
 
 	out := make([]dto.RoundResponse, 0, len(list))
@@ -313,6 +315,7 @@ func decodeRoundInput(w http.ResponseWriter, r *http.Request) (rounds.Input, boo
 		StartAt:         startAt,
 		DurationMinutes: req.DurationMinutes,
 		IsFinal:         req.IsFinal,
+		Level:           req.Level,
 	}, true
 }
 
@@ -326,6 +329,7 @@ func toRoundResponse(rnd *round.Round) dto.RoundResponse {
 		DurationMinutes: rnd.DurationMinutes,
 		Status:          string(rnd.Status),
 		IsFinal:         rnd.IsFinal,
+		Level:           rnd.Level,
 		CreatedAt:       rnd.CreatedAt,
 		UpdatedAt:       rnd.UpdatedAt,
 	}

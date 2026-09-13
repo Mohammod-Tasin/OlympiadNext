@@ -5,19 +5,24 @@ import "time"
 // RoundRequest is the admin-supplied payload for both create and update.
 // StartAt is an RFC3339 string, parsed strictly by the handler like
 // EventRequest.EventDate. IsFinal marks this as the event's one final
-// round; the backend rejects a second one for the same event.
+// round for its Level; the backend rejects a second one for the same
+// (event, level) pair. Level must be one of "Junior", "Secondary",
+// "Higher Secondary".
 type RoundRequest struct {
 	RoundOrder      int    `json:"round_order"`
 	RoundName       string `json:"round_name"`
 	StartAt         string `json:"start_at"`
 	DurationMinutes int    `json:"duration_minutes"`
 	IsFinal         bool   `json:"is_final"`
+	Level           string `json:"level"`
 }
 
 // RoundResponse is a round as seen by both the admin console and the
 // client frontend. YourStatus and Rank are only populated on the public
 // listing, and only when the request carried a valid access token; Rank
-// is further only ever non-nil when YourStatus is "winner".
+// is further only ever non-nil when YourStatus is "winner". The public
+// listing is also filtered to the caller's own Level when authenticated
+// (see RoundHandler.ListPublic) — the admin listing never filters.
 type RoundResponse struct {
 	ID              string    `json:"id"`
 	EventID         string    `json:"event_id"`
@@ -27,6 +32,7 @@ type RoundResponse struct {
 	DurationMinutes int       `json:"duration_minutes"`
 	Status          string    `json:"status"`
 	IsFinal         bool      `json:"is_final"`
+	Level           string    `json:"level"`
 	YourStatus      *string   `json:"your_status,omitempty"`
 	Rank            *int      `json:"rank,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`

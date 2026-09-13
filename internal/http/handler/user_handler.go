@@ -116,11 +116,37 @@ func (h *UserHandler) SubmitProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read-before-write: need the currently stored level/institution_name
+	// to detect a change before deciding whether a new document is
+	// required for it (see requiresNewVerificationDoc below).
+	current, err := h.users.FindByID(r.Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, user.ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "user not found")
+			return
+		}
+		h.log.Error("user submit profile: load current user failed", "user_id", claims.UserID, "error", err)
+		response.Error(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
 	// An empty verification_doc means "leave my document untouched". Only
 	// validate ownership when the caller actually supplies a new one.
 	doc := strings.TrimSpace(req.VerificationDoc)
 	if doc != "" && !isOwnedUserFileURL(doc, claims.UserID) {
 		response.Error(w, http.StatusBadRequest, "verification_doc must be a file you uploaded")
+		return
+	}
+
+	// Changing level or institution_name without a new document would
+	// silently keep the account's existing verification status pinned to
+	// identity details an admin never actually reviewed. The only UI path
+	// to this endpoint (the student profile edit page) already forces a
+	// document alongside such a change, so this is safe to enforce
+	// server-side; onboarding's own first submission always supplies a
+	// document regardless, so it's never blocked by this check.
+	if requiresNewVerificationDoc(strOrEmpty(current.Level), strOrEmpty(current.InstitutionName), level, institution, doc) {
+		response.Error(w, http.StatusBadRequest, "changing your level or school requires submitting a new verification document")
 		return
 	}
 
