@@ -39,4 +39,10 @@ type Repository interface {
 	// FindActive returns the most recent active event, or ErrNotFound
 	// when nothing is currently published.
 	FindActive(ctx context.Context) (*Event, error)
+	// ListAll returns every event, active or not, ordered with active
+	// events first and then by event_date descending within each group —
+	// see the postgres implementation's doc comment for why. Backs the
+	// public multi-event listing (GET /api/client/events/all), a superset
+	// of what FindActive alone can show.
+	ListAll(ctx context.Context) ([]*Event, error)
 }

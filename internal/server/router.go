@@ -112,6 +112,7 @@ func NewRouter(
 	r.Route("/api/client", func(r chi.Router) {
 		r.Use(appmw.RateLimitByIP(60, 20))
 		r.Get("/events", eventHandler.GetActiveEvent)
+		r.Get("/events/all", eventHandler.ListPublic)
 		r.Get("/events/{id}", eventHandler.GetByID)
 		r.Get("/events/{eventID}/rounds", roundHandler.ListPublic)
 		r.Get("/notices", noticeHandler.ListPublic)

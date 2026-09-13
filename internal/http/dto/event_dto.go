@@ -42,3 +42,11 @@ type EventResponse struct {
 type UploadResponse struct {
 	ImageURL string `json:"image_url"`
 }
+
+// EventListResponse is the body of GET /api/client/events/all. IsRegistered
+// is always false on every row — the route is unauthenticated, unlike the
+// single-event GetActiveEvent/GetByID routes.
+type EventListResponse struct {
+	Events []EventResponse `json:"events"`
+	Count  int             `json:"count"`
+}

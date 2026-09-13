@@ -79,6 +79,27 @@ func (h *EventHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, resp)
 }
 
+// ListPublic handles GET /api/client/events/all: every event, active or
+// not, ordered active-first then by event_date descending (see
+// EventRepository.ListAll). Fully public — unlike GetActiveEvent/GetByID
+// it does not attempt the optional-auth is_registered lookup, so every row
+// reports is_registered: false; a future events-listing page that needs
+// per-row registration state would call GetByID for the event the caller
+// picks.
+func (h *EventHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
+	list, err := h.events.ListEvents(r.Context())
+	if err != nil {
+		h.handleEventError(w, err)
+		return
+	}
+
+	out := make([]dto.EventResponse, 0, len(list))
+	for _, e := range list {
+		out = append(out, toEventResponse(e))
+	}
+	response.JSON(w, http.StatusOK, dto.EventListResponse{Events: out, Count: len(out)})
+}
+
 // attachIsRegistered fills resp.IsRegistered when the request carries a
 // valid access token, shared by GetActiveEvent and GetByID. A failed
 // check should not hide the event; it logs and leaves the flag false
