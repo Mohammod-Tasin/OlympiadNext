@@ -116,6 +116,33 @@ func (h *RegistrationHandler) ListMine(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, dto.RegistrationListResponse{Registrations: out, Count: len(out)})
 }
 
+// MyRegistrationStatus handles
+// GET /api/client/events/{eventID}/my-registration-status: the caller's
+// registration sub-state for that event — "none" | "pending" | "approved"
+// | "rejected". Lives under /api/client but opts into RequireAccessToken
+// per-route (like round entry) since it reports the caller's own data.
+func (h *RegistrationHandler) MyRegistrationStatus(w http.ResponseWriter, r *http.Request) {
+	claims, ok := middleware.AccessClaimsFromContext(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "unauthenticated")
+		return
+	}
+
+	eventID := strings.TrimSpace(chi.URLParam(r, "eventID"))
+	if eventID == "" {
+		response.Error(w, http.StatusBadRequest, "event id is required")
+		return
+	}
+
+	status, err := h.registrations.MyRegistrationStatus(r.Context(), claims.UserID, eventID)
+	if err != nil {
+		h.handleError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, dto.MyRegistrationStatusResponse{Status: status})
+}
+
 // ListForReview handles GET /api/admin/registrations, optionally filtered
 // by ?status=pending and/or ?event_id=<event UUID>. Admin-gated by middleware.
 func (h *RegistrationHandler) ListForReview(w http.ResponseWriter, r *http.Request) {

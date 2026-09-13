@@ -183,6 +183,24 @@ func (s *Service) Review(ctx context.Context, id, adminID string, decision regis
 	return nil
 }
 
+// MyRegistrationStatus reports the caller's registration sub-state for an
+// event: "none" if no row exists yet, otherwise the row's own status
+// ("pending"/"approved"/"rejected") passed through directly. Unlike
+// ExistsApprovedForUserEvent (round-entry eligibility, which only cares
+// whether the row is approved), this surfaces the full state so the
+// frontend can distinguish "never registered" from "pending review" from
+// "rejected" instead of a collapsed boolean.
+func (s *Service) MyRegistrationStatus(ctx context.Context, userID, eventID string) (string, error) {
+	reg, err := s.registrations.FindByUserAndEvent(ctx, userID, eventID)
+	if err != nil {
+		if errors.Is(err, registration.ErrNotFound) {
+			return "none", nil
+		}
+		return "", fmt.Errorf("registrations: my registration status failed: %w", err)
+	}
+	return string(reg.Status), nil
+}
+
 // Unreject is the narrow admin correction path for a mistaken rejection.
 // It permits only rejected -> pending and intentionally does not allow an
 // approved or already-pending registration to be edited this way.

@@ -86,6 +86,20 @@ func (r *RegistrationRepository) ExistsApprovedForUserEvent(ctx context.Context,
 	return exists, nil
 }
 
+// FindByUserAndEvent looks up the single registration row (if any) for a
+// user/event pair, for reporting the caller's own sub-state ("none" vs.
+// the row's actual status) rather than the collapsed approved-only check
+// ExistsApprovedForUserEvent performs.
+func (r *RegistrationRepository) FindByUserAndEvent(ctx context.Context, userID, eventID string) (*registration.Registration, error) {
+	const q = `SELECT ` + registrationColumns + ` FROM exam_registrations WHERE user_id = $1 AND event_id = $2`
+
+	var reg registration.Registration
+	if err := scanRegistrationInto(r.db.QueryRowContext(ctx, q, userID, eventID), &reg); err != nil {
+		return nil, err
+	}
+	return &reg, nil
+}
+
 func (r *RegistrationRepository) ListByUser(ctx context.Context, userID string) ([]*registration.Detail, error) {
 	const q = `
 		SELECT ` + registrationColumnsER + `, e.title

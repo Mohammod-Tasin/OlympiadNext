@@ -121,10 +121,17 @@ func NewRouter(
 		r.Get("/important-dates", importantDateHandler.ListPublic)
 
 		// The real entry gate for a round: a client-side countdown is
-		// never trusted. This is the one /api/client route that requires
-		// auth, so it opts in per-route rather than moving the whole
-		// group behind RequireAccessToken.
+		// never trusted. Along with my-registration-status below, these are
+		// the /api/client routes that require auth, so each opts in
+		// per-route rather than moving the whole group behind
+		// RequireAccessToken.
 		r.With(appmw.RequireAccessToken(jwtManager, users)).Post("/rounds/{roundID}/enter", roundHandler.EnterRound)
+
+		// The caller's own registration sub-state for an event — "none" |
+		// "pending" | "approved" | "rejected" — for UI copy that needs to
+		// distinguish those cases, unlike the collapsed approved-only check
+		// round eligibility uses.
+		r.With(appmw.RequireAccessToken(jwtManager, users)).Get("/events/{eventID}/my-registration-status", registrationHandler.MyRegistrationStatus)
 	})
 
 	// Admin surface: every route requires a valid access token AND an
