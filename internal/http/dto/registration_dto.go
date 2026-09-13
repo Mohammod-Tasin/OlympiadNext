@@ -58,6 +58,14 @@ type AdminRegistrationListResponse struct {
 	Count         int                         `json:"count"`
 }
 
+// MyRegistrationStatusResponse is the body of
+// GET /api/client/events/{eventID}/my-registration-status: the caller's
+// registration sub-state for that event — "none", "pending", "approved",
+// or "rejected".
+type MyRegistrationStatusResponse struct {
+	Status string `json:"status"`
+}
+
 // ReviewRegistrationRequest is the admin's decision for
 // PUT /api/admin/registrations/{id}/review.
 type ReviewRegistrationRequest struct {

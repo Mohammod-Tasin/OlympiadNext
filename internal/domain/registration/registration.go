@@ -104,6 +104,11 @@ type Repository interface {
 	// means for round-1 exam entry — a pending or rejected submission
 	// does not grant entry.
 	ExistsApprovedForUserEvent(ctx context.Context, userID, eventID string) (bool, error)
+	// FindByUserAndEvent returns the caller's registration row for a
+	// specific event. Returns ErrNotFound when no row exists — the
+	// uq_exam_reg_user_event constraint means at most one row can exist
+	// per (user, event), so this is a single lookup, not a list.
+	FindByUserAndEvent(ctx context.Context, userID, eventID string) (*Registration, error)
 	// ListByUser returns the caller's own registrations, newest first,
 	// each with its EventTitle populated.
 	ListByUser(ctx context.Context, userID string) ([]*Detail, error)
