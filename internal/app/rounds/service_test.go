@@ -113,7 +113,7 @@ func TestYourStatus_EliminatedInPriorRound_IsNotWaiting(t *testing.T) {
 		fakeRegRepo{},
 	)
 
-	got, err := svc.YourStatus(context.Background(), "u1", round2)
+	got, _, err := svc.YourStatus(context.Background(), "u1", round2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestYourStatus_PriorRoundNotYetDecided_IsWaiting(t *testing.T) {
 		fakeRegRepo{},
 	)
 
-	got, err := svc.YourStatus(context.Background(), "u1", round2)
+	got, _, err := svc.YourStatus(context.Background(), "u1", round2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestYourStatus_EndedRoundWithNoDecision_IsNotReadyOrLocked(t *testing.T) {
 		fakeRegRepo{existsApproved: func(_ context.Context, _, _ string) (bool, error) { return true, nil }},
 	)
 
-	got, err := svc.YourStatus(context.Background(), "u1", round1)
+	got, _, err := svc.YourStatus(context.Background(), "u1", round1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -12,9 +12,12 @@ is no phone/SMS auth — it was removed.
 Built so far: the auth/identity foundation, `student`/`admin` roles, admin-curated
 **events** (client-facing content blocks + image upload), an admin-curated
 bilingual **notice board**, a manual **student verification (KYC)** flow
-(upload a proof document, admin approves/rejects), and per-event **rounds**
+(upload a proof document, admin approves/rejects), per-event **rounds**
 (Qualifying/Semifinal/Final by default, admin-renameable) that gate entry
-into the next round via a qualified/eliminated/winner decision.
+into the next round via a qualified/eliminated/winner decision, one of
+which an admin may flag as the event's explicit **final round** (`is_final`)
+where a winner decision also carries a **rank** (placement), and admin-configured
+**prize tiers** (a named prize per rank range) shown alongside results.
 Contest problems, submissions, and scoring are **not built yet** — rounds
 only gate access to a future exam-taking flow.
 
@@ -43,15 +46,16 @@ Layered, hand-wired dependency injection in `main.go` (no DI framework):
 main.go                      config → db connect+migrate → repos → services → handlers → router
 internal/config/             env loading, fails fast on missing secrets
 internal/domain/             entities + repository INTERFACES + sentinel errors
-  user/ token/ device/ email/ event/ notice/ registration/ round/ sms/
+  user/ token/ device/ email/ event/ notice/ registration/ round/ prize/ sms/
 internal/auth/               service.go = all orchestration; sub-pkgs jwt/ hash/ google/ email/
 internal/app/events/         event service (admin content orchestration)
 internal/app/notices/        notice-board service (admin CRUD + public list)
 internal/app/registrations/  exam-registration payment + admit-card orchestration
-internal/app/rounds/         sequential event rounds: CRUD, start/end, entry gate, qualify/eliminate/winner
+internal/app/rounds/         sequential event rounds: CRUD, start/end, entry gate, qualify/eliminate/winner+rank
+internal/app/prizes/         per-event prize tiers: admin CRUD (rank-range validation) + public list
 internal/app/notify/         notification-channel preference, phone OTP, admit-card dispatch
 internal/repository/postgres/ implementations of the domain interfaces
-internal/http/               handler/ (auth, user, admin, event, notice, registration, notification, round) middleware/ dto/ response/
+internal/http/               handler/ (auth, user, admin, event, notice, registration, notification, round, prize) middleware/ dto/ response/
 internal/platform/           db/ (+ embedded migrations/), email/ (SMTP), sms/ (BulkSMSBD), storage/ (local uploads)
 internal/server/router.go    the whole route table
 ```
@@ -85,13 +89,15 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `GET /api/client/events/{id}` (same shape as above, but any event by id — not only the currently active one) | none (optional access token) |
 | `GET /api/client/notices` (active notices only, `display_order` ASC; each row carries `text_en` + `text_bn`) | none |
 | `GET /api/client/important-dates` (active only, `event_date` ASC then `display_order` ASC; each row carries `event_date` as `YYYY-MM-DD`, `title`, `details_en`, `details_bn`) | none |
-| `GET /api/client/events/{eventID}/rounds` (rounds for an event, `round_order` ASC; adds a per-round `your_status` when a valid access token is sent) | none (optional access token) |
+| `GET /api/client/events/{eventID}/rounds` (rounds for an event, `round_order` ASC, each carrying `is_final`; adds a per-round `your_status` — and, only when it is `"winner"`, `rank` — when a valid access token is sent) | none (optional access token) |
+| `GET /api/client/events/{eventID}/prizes` (prize tiers for an event, `rank_from` ASC; `{"prizes": [...], "count": N}`) | none |
 | `POST /api/client/rounds/{roundID}/enter` (the real entry gate — never trust a client-side countdown; `200 {"allowed":true}` or `403 {"reason":"..."}`) | access token |
 | `POST /api/admin/events`, `/events/upload`, `PUT /api/admin/events/{id}` | access token + admin |
-| `GET /api/admin/events/{eventID}/rounds` (same ordering as the client listing, no `your_status`), `POST /api/admin/events/{eventID}/rounds`, `PUT /api/admin/events/{eventID}/rounds/{id}`, `DELETE /api/admin/events/{eventID}/rounds/{id}` | access token + admin |
+| `GET /api/admin/events/{eventID}/rounds` (same ordering as the client listing, no `your_status`/`rank`), `POST /api/admin/events/{eventID}/rounds`, `PUT /api/admin/events/{eventID}/rounds/{id}` (both accept `is_final`; only one round per event may set it — a 400 if another already does), `DELETE /api/admin/events/{eventID}/rounds/{id}` | access token + admin |
+| `GET /api/admin/events/{eventID}/prizes`, `POST /api/admin/events/{eventID}/prizes`, `PUT /api/admin/events/{eventID}/prizes/{id}` (`rank_from`, `rank_to`, `prize_name`, optional `prize_description`; `rank_from` ≤ `rank_to`, no overlapping ranges within the event — both 400 on violation), `DELETE /api/admin/events/{eventID}/prizes/{id}` | access token + admin |
 | `POST /api/admin/rounds/{id}/start`, `/rounds/{id}/end` (forward-only `upcoming`→`ongoing`→`ended`) | access token + admin |
 | `GET /api/admin/rounds/{id}/candidates` (dynamic eligible list for the next decision; 409 unless the round has `ended`) | access token + admin |
-| `PUT /api/admin/rounds/{id}/participants` (bulk `[{"user_id","status"}]` upsert; `status:"winner"` only on the event's highest `round_order`; 409 unless the round has `ended`) | access token + admin |
+| `PUT /api/admin/rounds/{id}/participants` (bulk `[{"user_id","status","rank"}]` upsert; `status:"winner"` only on the round's `is_final`, and then requires a positive `rank`, unique within the request — everything else must omit `rank`; 409 unless the round has `ended`) | access token + admin |
 | `GET /api/admin/notices` (all notices, active or not), `POST /api/admin/notices`, `PUT /api/admin/notices/{id}` (`text_en`, `text_bn`, `display_order`, `is_active`), `DELETE /api/admin/notices/{id}` | access token + admin |
 | `GET /api/admin/important-dates` (all rows), `POST /api/admin/important-dates`, `PUT /api/admin/important-dates/{id}` (`event_date` `YYYY-MM-DD`, `title`, `details_en`, `details_bn`, `display_order`, `is_active`), `DELETE /api/admin/important-dates/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
@@ -200,10 +206,40 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   from the previous round's `qualified` participants, each annotated with
   its existing decision in *this* round if already decided) and records
   decisions in bulk (`PUT .../participants`, upserted by `(round_id,
-  user_id)`); `status:"winner"` is rejected unless the round is the
-  event's highest `round_order`. Actual exam content (problems,
-  submissions, scoring) is out of scope — rounds only gate access for a
-  future exam-taking flow.
+  user_id)`); `status:"winner"` is rejected unless the round has
+  `is_final = true` (an explicit admin flag, not inferred from
+  `round_order`). Actual exam content (problems, submissions, scoring) is
+  out of scope — rounds only gate access for a future exam-taking flow.
+- **Final round, winner rank, and prizes.** Exactly one round per event
+  may be flagged `is_final` — `rounds.Service.CreateRound`/`UpdateRound`
+  check no *other* round for the same event already has it set (a friendly
+  `rounds.ErrValidation` → 400, "only one final round allowed per event")
+  before the DB's own backstop, a partial unique index
+  (`uq_rounds_one_final_per_event ON rounds(event_id) WHERE is_final`),
+  which only a genuine concurrent-request race should ever actually hit
+  (mapped to `round.ErrDuplicateFinal` → 409). A `winner` decision on the
+  final round must carry a positive `rank` (1st, 2nd, 3rd…); every other
+  decision (`qualified`/`eliminated`, or `winner` decisions on a
+  non-final round — already rejected on its own) must omit `rank`
+  entirely — `rounds.Service.SetParticipants` rejects both a missing rank
+  on a winner and a present rank on anything else, and rejects two
+  decisions in the same request reusing the same rank. `round_participants.rank`
+  is nullable and partial-unique per `(round_id, rank)`
+  (`uq_round_participants_rank ... WHERE rank IS NOT NULL`) as the same
+  kind of race backstop (`round.ErrDuplicateRank` → 409). The public round
+  listing surfaces a caller's own rank alongside `your_status` — see the
+  route table — so the frontend never needs a second call to show it.
+  Separately, an admin configures **prize tiers** per event
+  (`internal/app/prizes/`, table `prizes`) — a `prize_name` (+ optional
+  `prize_description`) for an inclusive `rank_from`–`rank_to` range,
+  `CHECK (rank_from <= rank_to)` at the DB layer and a service-layer check
+  rejecting any range that overlaps an existing tier for the same event
+  (`prizes.ErrValidation` → 400). Prizes are purely informational: nothing
+  connects a `prizes` row to `round_participants.rank` automatically, and
+  a prize tier has no draft/active state, so the admin (`GET
+  /api/admin/events/{eventID}/prizes`) and public (`GET
+  /api/client/events/{eventID}/prizes`) listings call the exact same
+  `prizes.Service.ListByEvent` and return identical data.
 - **Notifications & phone OTP.** `users.notification_method` (`email` default
   / `phone`) is the channel for transactional alerts (currently only the
   admit-card-ready message). A student opts into SMS with

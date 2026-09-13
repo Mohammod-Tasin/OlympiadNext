@@ -61,16 +61,23 @@ type Round struct {
 	StartAt         time.Time
 	DurationMinutes int
 	Status          Status
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// IsFinal marks the event's one designated final round explicitly,
+	// rather than it being inferred from "highest round_order" at request
+	// time. Only a final round may record a 'winner' decision.
+	IsFinal   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
-// Participant is one student's recorded decision for one round.
+// Participant is one student's recorded decision for one round. Rank is
+// only ever set alongside Status == ParticipantWinner (the event's final
+// placement, 1st/2nd/3rd...); it is nil for every other decision.
 type Participant struct {
 	ID        string
 	RoundID   string
 	UserID    string
 	Status    ParticipantStatus
+	Rank      *int
 	DecidedAt time.Time
 }
 
@@ -87,8 +94,8 @@ type ParticipantDetail struct {
 // application layer never depends on a concrete database driver.
 type Repository interface {
 	Create(ctx context.Context, r *Round) error
-	// Update replaces a round's order/name/start/duration. It never
-	// touches Status — that only moves via SetStatus.
+	// Update replaces a round's order/name/start/duration/is_final. It
+	// never touches Status — that only moves via SetStatus.
 	Update(ctx context.Context, r *Round) error
 	Delete(ctx context.Context, id string) error
 	FindByID(ctx context.Context, id string) (*Round, error)
@@ -98,9 +105,6 @@ type Repository interface {
 	// ListByEvent returns every round for an event, ordered by round_order
 	// ascending.
 	ListByEvent(ctx context.Context, eventID string) ([]*Round, error)
-	// MaxRoundOrder returns the highest round_order configured for an
-	// event, or 0 if it has none yet.
-	MaxRoundOrder(ctx context.Context, eventID string) (int, error)
 	// SetStatus performs a guarded compare-and-swap (WHERE id = ? AND
 	// status = from), returning ErrNotFound for an unknown id or
 	// ErrInvalidTransition when the round is not currently in the from
