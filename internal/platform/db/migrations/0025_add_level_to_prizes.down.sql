@@ -1,0 +1,1 @@
+ALTER TABLE prizes DROP COLUMN IF EXISTS level;

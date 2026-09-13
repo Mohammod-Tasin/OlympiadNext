@@ -3,12 +3,15 @@ package dto
 import "time"
 
 // PrizeRequest is the admin-supplied payload for both create and update.
-// PrizeDescription is optional.
+// PrizeDescription is optional. Level must be one of "Junior",
+// "Secondary", "Higher Secondary"; overlap validation is scoped to
+// (event, level), so two levels may reuse the same rank range.
 type PrizeRequest struct {
 	RankFrom         int     `json:"rank_from"`
 	RankTo           int     `json:"rank_to"`
 	PrizeName        string  `json:"prize_name"`
 	PrizeDescription *string `json:"prize_description,omitempty"`
+	Level            string  `json:"level"`
 }
 
 // PrizeResponse is a prize tier as seen by both the admin console and the
@@ -20,6 +23,7 @@ type PrizeResponse struct {
 	RankTo           int       `json:"rank_to"`
 	PrizeName        string    `json:"prize_name"`
 	PrizeDescription *string   `json:"prize_description,omitempty"`
+	Level            string    `json:"level"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }

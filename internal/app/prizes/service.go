@@ -23,6 +23,16 @@ import (
 // it to a 400 response.
 var ErrValidation = errors.New("prizes: invalid prize data")
 
+// allowedLevels mirrors internal/http/handler/profile_fields.go's own
+// allowedLevels exactly (the same three values users.level enforces), the
+// same way internal/app/rounds does. Duplicated rather than imported to
+// avoid an app-layer package depending on the http/handler layer.
+var allowedLevels = map[string]bool{
+	"Junior":           true,
+	"Secondary":        true,
+	"Higher Secondary": true,
+}
+
 // Input is the mutable state of a prize tier, supplied by an admin on
 // both create and update.
 type Input struct {
@@ -30,6 +40,10 @@ type Input struct {
 	RankTo           int
 	PrizeName        string
 	PrizeDescription *string
+	// Level scopes this tier to one academic level; must be one of
+	// allowedLevels. Two different levels may configure identical or
+	// overlapping rank ranges without conflict.
+	Level string
 }
 
 func (in Input) validate() error {
@@ -44,6 +58,9 @@ func (in Input) validate() error {
 	}
 	if strings.TrimSpace(in.PrizeName) == "" {
 		return fmt.Errorf("%w: prize_name is required", ErrValidation)
+	}
+	if !allowedLevels[in.Level] {
+		return fmt.Errorf("%w: level must be one of: Junior, Secondary, Higher Secondary", ErrValidation)
 	}
 	return nil
 }
@@ -86,12 +103,13 @@ func (s *Service) Create(ctx context.Context, eventID string, in Input) (*prize.
 		RankTo:           in.RankTo,
 		PrizeName:        strings.TrimSpace(in.PrizeName),
 		PrizeDescription: normalizedDescription(in.PrizeDescription),
+		Level:            in.Level,
 	}
 	if err := s.prizes.Create(ctx, p); err != nil {
 		return nil, err
 	}
 
-	s.log.Info("prize created", "prize_id", p.ID, "event_id", eventID, "rank_from", p.RankFrom, "rank_to", p.RankTo)
+	s.log.Info("prize created", "prize_id", p.ID, "event_id", eventID, "rank_from", p.RankFrom, "rank_to", p.RankTo, "level", p.Level)
 	return p, nil
 }
 
@@ -114,12 +132,13 @@ func (s *Service) Update(ctx context.Context, eventID, id string, in Input) (*pr
 		RankTo:           in.RankTo,
 		PrizeName:        strings.TrimSpace(in.PrizeName),
 		PrizeDescription: normalizedDescription(in.PrizeDescription),
+		Level:            in.Level,
 	}
 	if err := s.prizes.Update(ctx, p); err != nil {
 		return nil, err
 	}
 
-	s.log.Info("prize updated", "prize_id", p.ID, "event_id", eventID)
+	s.log.Info("prize updated", "prize_id", p.ID, "event_id", eventID, "level", p.Level)
 	return p, nil
 }
 
@@ -140,19 +159,21 @@ func (s *Service) ListByEvent(ctx context.Context, eventID string) ([]*prize.Pri
 }
 
 // checkNoOverlap rejects a rank range that overlaps an existing prize
-// tier for the same event, other than the tier being updated (excludeID
-// is "" on create, when nothing is excluded).
+// tier for the same (event, level), other than the tier being updated
+// (excludeID is "" on create, when nothing is excluded). A different
+// level's tiers are never compared — two levels may configure identical
+// or overlapping rank ranges without conflict.
 func (s *Service) checkNoOverlap(ctx context.Context, eventID string, in Input, excludeID string) error {
 	existing, err := s.prizes.ListByEvent(ctx, eventID)
 	if err != nil {
 		return err
 	}
 	for _, p := range existing {
-		if p.ID == excludeID {
+		if p.ID == excludeID || p.Level != in.Level {
 			continue
 		}
 		if in.RankFrom <= p.RankTo && p.RankFrom <= in.RankTo {
-			return fmt.Errorf("%w: rank range %d-%d overlaps an existing prize tier (%d-%d)", ErrValidation, in.RankFrom, in.RankTo, p.RankFrom, p.RankTo)
+			return fmt.Errorf("%w: rank range %d-%d overlaps an existing prize tier (%d-%d) for this level", ErrValidation, in.RankFrom, in.RankTo, p.RankFrom, p.RankTo)
 		}
 	}
 	return nil

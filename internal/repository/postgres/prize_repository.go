@@ -9,7 +9,7 @@ import (
 	"olympiadnext/internal/domain/prize"
 )
 
-const prizeColumns = `id, event_id, rank_from, rank_to, prize_name, prize_description, created_at, updated_at`
+const prizeColumns = `id, event_id, rank_from, rank_to, prize_name, prize_description, level, created_at, updated_at`
 
 type PrizeRepository struct {
 	db *sql.DB
@@ -21,11 +21,11 @@ func NewPrizeRepository(db *sql.DB) *PrizeRepository {
 
 func (r *PrizeRepository) Create(ctx context.Context, p *prize.Prize) error {
 	const q = `
-		INSERT INTO prizes (id, event_id, rank_from, rank_to, prize_name, prize_description, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now(), now())
+		INSERT INTO prizes (id, event_id, rank_from, rank_to, prize_name, prize_description, level, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, now(), now())
 		RETURNING id, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, p.EventID, p.RankFrom, p.RankTo, p.PrizeName, p.PrizeDescription).
+	err := r.db.QueryRowContext(ctx, q, p.EventID, p.RankFrom, p.RankTo, p.PrizeName, p.PrizeDescription, p.Level).
 		Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("prize_repository: create failed: %w", err)
@@ -36,11 +36,11 @@ func (r *PrizeRepository) Create(ctx context.Context, p *prize.Prize) error {
 func (r *PrizeRepository) Update(ctx context.Context, p *prize.Prize) error {
 	const q = `
 		UPDATE prizes
-		SET rank_from = $1, rank_to = $2, prize_name = $3, prize_description = $4, updated_at = now()
-		WHERE id = $5
+		SET rank_from = $1, rank_to = $2, prize_name = $3, prize_description = $4, level = $5, updated_at = now()
+		WHERE id = $6
 		RETURNING updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, p.RankFrom, p.RankTo, p.PrizeName, p.PrizeDescription, p.ID).
+	err := r.db.QueryRowContext(ctx, q, p.RankFrom, p.RankTo, p.PrizeName, p.PrizeDescription, p.Level, p.ID).
 		Scan(&p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return prize.ErrNotFound
@@ -80,7 +80,7 @@ func (r *PrizeRepository) ListByEvent(ctx context.Context, eventID string) ([]*p
 	var out []*prize.Prize
 	for rows.Next() {
 		var p prize.Prize
-		if err := rows.Scan(&p.ID, &p.EventID, &p.RankFrom, &p.RankTo, &p.PrizeName, &p.PrizeDescription, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.EventID, &p.RankFrom, &p.RankTo, &p.PrizeName, &p.PrizeDescription, &p.Level, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("prize_repository: scan failed: %w", err)
 		}
 		out = append(out, &p)

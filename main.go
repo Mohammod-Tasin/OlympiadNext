@@ -105,7 +105,7 @@ func main() {
 	registrationHandler := handler.NewRegistrationHandler(registrationService, fileStorage, notifyService, log)
 
 	roundRepo := postgres.NewRoundRepository(conn)
-	roundService := rounds.NewService(roundRepo, registrationRepo, log)
+	roundService := rounds.NewService(roundRepo, registrationRepo, userRepo, log)
 	roundHandler := handler.NewRoundHandler(roundService, jwtManager, log)
 
 	prizeRepo := postgres.NewPrizeRepository(conn)

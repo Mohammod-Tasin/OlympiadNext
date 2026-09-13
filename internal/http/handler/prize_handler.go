@@ -137,6 +137,7 @@ func decodePrizeInput(w http.ResponseWriter, r *http.Request) (prizes.Input, boo
 		RankTo:           req.RankTo,
 		PrizeName:        req.PrizeName,
 		PrizeDescription: req.PrizeDescription,
+		Level:            req.Level,
 	}, true
 }
 
@@ -148,6 +149,7 @@ func toPrizeResponse(p *prize.Prize) dto.PrizeResponse {
 		RankTo:           p.RankTo,
 		PrizeName:        p.PrizeName,
 		PrizeDescription: p.PrizeDescription,
+		Level:            p.Level,
 		CreatedAt:        p.CreatedAt,
 		UpdatedAt:        p.UpdatedAt,
 	}

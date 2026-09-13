@@ -48,3 +48,28 @@ func validateProfileFields(fullName, institution, level, medium string) (trimmed
 	}
 	return trimmedFullName, trimmedInstitution, trimmedLevel, trimmedMedium, ""
 }
+
+// requiresNewVerificationDoc reports whether changing level or
+// institutionName away from the currently stored value (currentLevel /
+// currentInstitution) demands a new verification document in this same
+// request: changing either invalidates the admin's existing review of the
+// student's identity, so a fresh document must accompany the change. A
+// brand-new account (both current values "") always has doc set already
+// by the caller's own onboarding flow, so this never blocks first-time
+// submission.
+func requiresNewVerificationDoc(currentLevel, currentInstitution, newLevel, newInstitution, doc string) bool {
+	if doc != "" {
+		return false
+	}
+	return newLevel != currentLevel || newInstitution != currentInstitution
+}
+
+// strOrEmpty dereferences an optional profile field (Level /
+// InstitutionName are nil until onboarding sets them) to "" rather than
+// panicking on a nil pointer.
+func strOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

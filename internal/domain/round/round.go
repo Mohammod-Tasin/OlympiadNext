@@ -64,7 +64,12 @@ type Round struct {
 	// IsFinal marks the event's one designated final round explicitly,
 	// rather than it being inferred from "highest round_order" at request
 	// time. Only a final round may record a 'winner' decision.
-	IsFinal   bool
+	IsFinal bool
+	// Level scopes this round to one of the three academic levels
+	// ("Junior", "Secondary", "Higher Secondary" — the same enum
+	// users.level enforces). Each level has its own independent
+	// round_order sequence and its own final round within one event.
+	Level     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -100,8 +105,10 @@ type Repository interface {
 	Delete(ctx context.Context, id string) error
 	FindByID(ctx context.Context, id string) (*Round, error)
 	// FindByEventAndOrder returns ErrNotFound when no round at that
-	// position exists yet (e.g. round 1 has no "round 0").
-	FindByEventAndOrder(ctx context.Context, eventID string, order int) (*Round, error)
+	// position exists yet (e.g. round 1 has no "round 0"). level scopes the
+	// lookup to that level's own round sequence — round 2 of "Secondary"
+	// must find round 1 of "Secondary", never another level's round 1.
+	FindByEventAndOrder(ctx context.Context, eventID, level string, order int) (*Round, error)
 	// ListByEvent returns every round for an event, ordered by round_order
 	// ascending.
 	ListByEvent(ctx context.Context, eventID string) ([]*Round, error)
