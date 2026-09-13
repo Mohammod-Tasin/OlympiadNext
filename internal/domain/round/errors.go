@@ -14,4 +14,14 @@ var (
 	// ErrNotEnded is returned by the candidates/participants operations
 	// when the round has not been ended yet.
 	ErrNotEnded = errors.New("round has not ended yet")
+	// ErrDuplicateFinal is the DB-constraint fallback for
+	// uq_rounds_one_final_per_event — the service layer already checks
+	// this and returns a friendly rounds.ErrValidation first, so this only
+	// surfaces on a genuine concurrent-request race.
+	ErrDuplicateFinal = errors.New("only one final round is allowed per event")
+	// ErrDuplicateRank is the DB-constraint fallback for
+	// uq_round_participants_rank, for the same reason: rounds.Service
+	// already rejects a duplicate rank within one request, so this only
+	// surfaces on a race between two separate requests.
+	ErrDuplicateRank = errors.New("rank is already assigned to another participant in this round")
 )

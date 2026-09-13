@@ -33,6 +33,10 @@ type Input struct {
 	RoundName       string
 	StartAt         time.Time
 	DurationMinutes int
+	// IsFinal marks this as the event's one final round. At most one round
+	// per event may set this — checked in CreateRound/UpdateRound before
+	// the DB constraint would reject it.
+	IsFinal bool
 }
 
 func (in Input) validate() error {
@@ -52,9 +56,11 @@ func (in Input) validate() error {
 }
 
 // ParticipantDecision is one admin decision submitted to SetParticipants.
+// Rank is only accepted (and required) when Status is 'winner'.
 type ParticipantDecision struct {
 	UserID string
 	Status round.ParticipantStatus
+	Rank   *int
 }
 
 // Candidate is one student eligible for a round's next decision, with
@@ -65,6 +71,9 @@ type Candidate struct {
 	FullName       *string
 	Email          string
 	ExistingStatus *string
+	// ExistingRank is the candidate's stored rank when ExistingStatus is
+	// "winner"; nil otherwise (no decision yet, or a non-winner decision).
+	ExistingRank *int
 }
 
 type Service struct {
@@ -83,6 +92,11 @@ func (s *Service) CreateRound(ctx context.Context, eventID string, in Input) (*r
 	if err := in.validate(); err != nil {
 		return nil, err
 	}
+	if in.IsFinal {
+		if err := s.checkNoOtherFinal(ctx, eventID, ""); err != nil {
+			return nil, err
+		}
+	}
 
 	rnd := &round.Round{
 		EventID:         eventID,
@@ -90,18 +104,19 @@ func (s *Service) CreateRound(ctx context.Context, eventID string, in Input) (*r
 		RoundName:       strings.TrimSpace(in.RoundName),
 		StartAt:         in.StartAt,
 		DurationMinutes: in.DurationMinutes,
+		IsFinal:         in.IsFinal,
 	}
 	if err := s.rounds.Create(ctx, rnd); err != nil {
 		return nil, err
 	}
 
-	s.log.Info("round created", "round_id", rnd.ID, "event_id", eventID, "round_order", rnd.RoundOrder)
+	s.log.Info("round created", "round_id", rnd.ID, "event_id", eventID, "round_order", rnd.RoundOrder, "is_final", rnd.IsFinal)
 	return rnd, nil
 }
 
-// UpdateRound replaces the order/name/start/duration of an existing
-// round. Returns round.ErrNotFound when the id does not exist. Admin-only
-// at the transport layer.
+// UpdateRound replaces the order/name/start/duration/is_final of an
+// existing round. Returns round.ErrNotFound when the id does not exist.
+// Admin-only at the transport layer.
 func (s *Service) UpdateRound(ctx context.Context, id string, in Input) (*round.Round, error) {
 	if err := in.validate(); err != nil {
 		return nil, err
@@ -112,17 +127,44 @@ func (s *Service) UpdateRound(ctx context.Context, id string, in Input) (*round.
 		return nil, err
 	}
 
+	if in.IsFinal {
+		if err := s.checkNoOtherFinal(ctx, existing.EventID, existing.ID); err != nil {
+			return nil, err
+		}
+	}
+
 	existing.RoundOrder = in.RoundOrder
 	existing.RoundName = strings.TrimSpace(in.RoundName)
 	existing.StartAt = in.StartAt
 	existing.DurationMinutes = in.DurationMinutes
+	existing.IsFinal = in.IsFinal
 
 	if err := s.rounds.Update(ctx, existing); err != nil {
 		return nil, err
 	}
 
-	s.log.Info("round updated", "round_id", existing.ID)
+	s.log.Info("round updated", "round_id", existing.ID, "is_final", existing.IsFinal)
 	return existing, nil
+}
+
+// checkNoOtherFinal returns a friendly ErrValidation when eventID already
+// has a round marked final other than excludeID, so the error surfaces as
+// a 400 before the uq_rounds_one_final_per_event constraint would reject
+// it as a raw DB conflict.
+func (s *Service) checkNoOtherFinal(ctx context.Context, eventID, excludeID string) error {
+	existing, err := s.rounds.ListByEvent(ctx, eventID)
+	if err != nil {
+		return err
+	}
+	for _, r := range existing {
+		if r.ID == excludeID {
+			continue
+		}
+		if r.IsFinal {
+			return fmt.Errorf("%w: only one final round allowed per event", ErrValidation)
+		}
+	}
+	return nil
 }
 
 // DeleteRound removes a round. Admin-only at the transport layer.
@@ -227,43 +269,44 @@ func (s *Service) EnterRound(ctx context.Context, roundID, userID string) (bool,
 }
 
 // YourStatus backs the public round listing's per-caller your_status: an
-// already-recorded decision is reported verbatim; otherwise it is one of
+// already-recorded decision is reported verbatim (plus its rank, non-nil
+// only for a 'winner' decision); otherwise the status is one of
 // "not_eligible" (round 1, no approved registration), "eliminated" (round
 // N>1, decided against the student in round N-1 — or eligible for this
 // round but it has ended with no decision recorded for them), "waiting"
 // (round N>1, round N-1 has no decision yet), "ready" (eligible, round
 // ongoing, start_at passed) or "locked" (eligible, but not yet time or the
-// round isn't ongoing).
-func (s *Service) YourStatus(ctx context.Context, userID string, rnd *round.Round) (string, error) {
+// round isn't ongoing) — and rank is nil in every one of those cases.
+func (s *Service) YourStatus(ctx context.Context, userID string, rnd *round.Round) (status string, rank *int, err error) {
 	p, err := s.rounds.GetParticipant(ctx, rnd.ID, userID)
 	if err == nil {
-		return string(p.Status), nil
+		return string(p.Status), p.Rank, nil
 	}
 	if !errors.Is(err, round.ErrParticipantNotFound) {
-		return "", err
+		return "", nil, err
 	}
 
 	eligible, priorDecided, err := s.isEligibleForRound(ctx, userID, rnd)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if !eligible {
 		if rnd.RoundOrder == 1 {
-			return "not_eligible", nil
+			return "not_eligible", nil, nil
 		}
 		if priorDecided {
-			return "eliminated", nil
+			return "eliminated", nil, nil
 		}
-		return "waiting", nil
+		return "waiting", nil, nil
 	}
 
 	if rnd.Status == round.StatusEnded {
-		return "eliminated", nil
+		return "eliminated", nil, nil
 	}
 	if rnd.Status == round.StatusOngoing && !time.Now().UTC().Before(rnd.StartAt) {
-		return "ready", nil
+		return "ready", nil, nil
 	}
-	return "locked", nil
+	return "locked", nil, nil
 }
 
 // maxCandidateList caps the round-1 candidate source query
@@ -312,22 +355,24 @@ func (s *Service) GetCandidates(ctx context.Context, roundID string) ([]Candidat
 	if err != nil {
 		return nil, err
 	}
-	existingByUser := make(map[string]round.ParticipantStatus, len(existing))
+	existingByUser := make(map[string]*round.Participant, len(existing))
 	for _, p := range existing {
-		existingByUser[p.UserID] = p.Status
+		existingByUser[p.UserID] = p
 	}
 	for i := range candidates {
-		if st, ok := existingByUser[candidates[i].UserID]; ok {
-			label := string(st)
+		if p, ok := existingByUser[candidates[i].UserID]; ok {
+			label := string(p.Status)
 			candidates[i].ExistingStatus = &label
+			candidates[i].ExistingRank = p.Rank
 		}
 	}
 	return candidates, nil
 }
 
 // SetParticipants bulk-records this round's decisions. Only callable once
-// the round has ended; 'winner' is only accepted on an event's
-// highest-numbered round.
+// the round has ended; 'winner' is only accepted on the event's final
+// round (rnd.IsFinal) and requires a positive, request-unique rank; every
+// other status must not carry a rank at all.
 func (s *Service) SetParticipants(ctx context.Context, roundID string, decisions []ParticipantDecision) (int, error) {
 	rnd, err := s.rounds.FindByID(ctx, roundID)
 	if err != nil {
@@ -340,12 +385,7 @@ func (s *Service) SetParticipants(ctx context.Context, roundID string, decisions
 		return 0, fmt.Errorf("%w: at least one participant decision is required", ErrValidation)
 	}
 
-	maxOrder, err := s.rounds.MaxRoundOrder(ctx, rnd.EventID)
-	if err != nil {
-		return 0, err
-	}
-	isFinalRound := rnd.RoundOrder == maxOrder
-
+	seenRanks := make(map[int]bool, len(decisions))
 	participants := make([]round.Participant, 0, len(decisions))
 	for _, d := range decisions {
 		userID := strings.TrimSpace(d.UserID)
@@ -355,10 +395,21 @@ func (s *Service) SetParticipants(ctx context.Context, roundID string, decisions
 		if !d.Status.Valid() {
 			return 0, fmt.Errorf("%w: status must be one of qualified, eliminated, winner", ErrValidation)
 		}
-		if d.Status == round.ParticipantWinner && !isFinalRound {
-			return 0, fmt.Errorf("%w: winner status is only allowed on the final round", ErrValidation)
+		if d.Status == round.ParticipantWinner {
+			if !rnd.IsFinal {
+				return 0, fmt.Errorf("%w: winner status is only allowed on the final round", ErrValidation)
+			}
+			if d.Rank == nil || *d.Rank <= 0 {
+				return 0, fmt.Errorf("%w: rank is required and must be a positive integer for a winner decision", ErrValidation)
+			}
+			if seenRanks[*d.Rank] {
+				return 0, fmt.Errorf("%w: rank %d is assigned to more than one participant in this request", ErrValidation, *d.Rank)
+			}
+			seenRanks[*d.Rank] = true
+		} else if d.Rank != nil {
+			return 0, fmt.Errorf("%w: rank is only accepted for a winner decision", ErrValidation)
 		}
-		participants = append(participants, round.Participant{RoundID: roundID, UserID: userID, Status: d.Status})
+		participants = append(participants, round.Participant{RoundID: roundID, UserID: userID, Status: d.Status, Rank: d.Rank})
 	}
 
 	if err := s.rounds.UpsertParticipants(ctx, roundID, participants); err != nil {

@@ -54,11 +54,12 @@ func (h *RoundHandler) ListPublic(w http.ResponseWriter, r *http.Request) {
 	for _, rnd := range list {
 		resp := toRoundResponse(rnd)
 		if userID != "" {
-			status, err := h.rounds.YourStatus(r.Context(), userID, rnd)
+			status, rank, err := h.rounds.YourStatus(r.Context(), userID, rnd)
 			if err != nil {
 				h.log.Error("round your-status check failed", "user_id", userID, "round_id", rnd.ID, "error", err)
 			} else {
 				resp.YourStatus = &status
+				resp.Rank = rank
 			}
 		}
 		out = append(out, resp)
@@ -235,6 +236,7 @@ func (h *RoundHandler) Candidates(w http.ResponseWriter, r *http.Request) {
 			FullName:       c.FullName,
 			Email:          c.Email,
 			ExistingStatus: c.ExistingStatus,
+			ExistingRank:   c.ExistingRank,
 		})
 	}
 	response.JSON(w, http.StatusOK, dto.CandidateListResponse{Candidates: out, Count: len(out)})
@@ -260,6 +262,7 @@ func (h *RoundHandler) SetParticipants(w http.ResponseWriter, r *http.Request) {
 		decisions = append(decisions, rounds.ParticipantDecision{
 			UserID: d.UserID,
 			Status: round.ParticipantStatus(strings.TrimSpace(d.Status)),
+			Rank:   d.Rank,
 		})
 	}
 
@@ -279,7 +282,7 @@ func (h *RoundHandler) handleRoundError(w http.ResponseWriter, err error) {
 		response.Error(w, http.StatusConflict, "invalid round status transition")
 	case errors.Is(err, round.ErrNotEnded):
 		response.Error(w, http.StatusConflict, "round has not ended yet")
-	case errors.Is(err, round.ErrDuplicateOrder):
+	case errors.Is(err, round.ErrDuplicateOrder), errors.Is(err, round.ErrDuplicateFinal), errors.Is(err, round.ErrDuplicateRank):
 		response.Error(w, http.StatusConflict, err.Error())
 	case errors.Is(err, rounds.ErrValidation):
 		response.Error(w, http.StatusBadRequest, err.Error())
@@ -309,6 +312,7 @@ func decodeRoundInput(w http.ResponseWriter, r *http.Request) (rounds.Input, boo
 		RoundName:       req.RoundName,
 		StartAt:         startAt,
 		DurationMinutes: req.DurationMinutes,
+		IsFinal:         req.IsFinal,
 	}, true
 }
 
@@ -321,6 +325,7 @@ func toRoundResponse(rnd *round.Round) dto.RoundResponse {
 		StartAt:         rnd.StartAt,
 		DurationMinutes: rnd.DurationMinutes,
 		Status:          string(rnd.Status),
+		IsFinal:         rnd.IsFinal,
 		CreatedAt:       rnd.CreatedAt,
 		UpdatedAt:       rnd.UpdatedAt,
 	}

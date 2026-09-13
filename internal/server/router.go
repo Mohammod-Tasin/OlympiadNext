@@ -25,6 +25,7 @@ func NewRouter(
 	registrationHandler *handler.RegistrationHandler,
 	notificationHandler *handler.NotificationHandler,
 	roundHandler *handler.RoundHandler,
+	prizeHandler *handler.PrizeHandler,
 	jwtManager *jwt.Manager,
 	users user.Repository,
 	allowedOrigins []string,
@@ -115,6 +116,7 @@ func NewRouter(
 		r.Get("/events/all", eventHandler.ListPublic)
 		r.Get("/events/{id}", eventHandler.GetByID)
 		r.Get("/events/{eventID}/rounds", roundHandler.ListPublic)
+		r.Get("/events/{eventID}/prizes", prizeHandler.ListPublic)
 		r.Get("/notices", noticeHandler.ListPublic)
 		r.Get("/important-dates", importantDateHandler.ListPublic)
 
@@ -141,6 +143,11 @@ func NewRouter(
 			r.Post("/{eventID}/rounds", roundHandler.Create)
 			r.Put("/{eventID}/rounds/{id}", roundHandler.Update)
 			r.Delete("/{eventID}/rounds/{id}", roundHandler.Delete)
+
+			r.Get("/{eventID}/prizes", prizeHandler.List)
+			r.Post("/{eventID}/prizes", prizeHandler.Create)
+			r.Put("/{eventID}/prizes/{id}", prizeHandler.Update)
+			r.Delete("/{eventID}/prizes/{id}", prizeHandler.Delete)
 		})
 
 		// Round status transitions and the post-round decision workflow.

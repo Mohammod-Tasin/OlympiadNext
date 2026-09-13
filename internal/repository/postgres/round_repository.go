@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	roundColumns       = `id, event_id, round_order, round_name, start_at, duration_minutes, status, created_at, updated_at`
-	participantColumns = `id, round_id, user_id, status, decided_at`
+	roundColumns       = `id, event_id, round_order, round_name, start_at, duration_minutes, status, is_final, created_at, updated_at`
+	participantColumns = `id, round_id, user_id, status, rank, decided_at`
 )
 
 type RoundRepository struct {
@@ -26,15 +26,18 @@ func NewRoundRepository(db *sql.DB) *RoundRepository {
 
 func (r *RoundRepository) Create(ctx context.Context, rnd *round.Round) error {
 	const q = `
-		INSERT INTO rounds (id, event_id, round_order, round_name, start_at, duration_minutes, status, created_at, updated_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'upcoming', now(), now())
+		INSERT INTO rounds (id, event_id, round_order, round_name, start_at, duration_minutes, status, is_final, created_at, updated_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'upcoming', $6, now(), now())
 		RETURNING id, status, created_at, updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, rnd.EventID, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes).
+	err := r.db.QueryRowContext(ctx, q, rnd.EventID, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.IsFinal).
 		Scan(&rnd.ID, &rnd.Status, &rnd.CreatedAt, &rnd.UpdatedAt)
 	if err != nil {
 		if isDuplicateRoundOrder(err) {
 			return round.ErrDuplicateOrder
+		}
+		if isDuplicateFinalRound(err) {
+			return round.ErrDuplicateFinal
 		}
 		return fmt.Errorf("round_repository: create failed: %w", err)
 	}
@@ -44,11 +47,11 @@ func (r *RoundRepository) Create(ctx context.Context, rnd *round.Round) error {
 func (r *RoundRepository) Update(ctx context.Context, rnd *round.Round) error {
 	const q = `
 		UPDATE rounds
-		SET round_order = $1, round_name = $2, start_at = $3, duration_minutes = $4, updated_at = now()
-		WHERE id = $5
+		SET round_order = $1, round_name = $2, start_at = $3, duration_minutes = $4, is_final = $5, updated_at = now()
+		WHERE id = $6
 		RETURNING updated_at`
 
-	err := r.db.QueryRowContext(ctx, q, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.ID).
+	err := r.db.QueryRowContext(ctx, q, rnd.RoundOrder, rnd.RoundName, rnd.StartAt, rnd.DurationMinutes, rnd.IsFinal, rnd.ID).
 		Scan(&rnd.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return round.ErrNotFound
@@ -56,6 +59,9 @@ func (r *RoundRepository) Update(ctx context.Context, rnd *round.Round) error {
 	if err != nil {
 		if isDuplicateRoundOrder(err) {
 			return round.ErrDuplicateOrder
+		}
+		if isDuplicateFinalRound(err) {
+			return round.ErrDuplicateFinal
 		}
 		return fmt.Errorf("round_repository: update failed: %w", err)
 	}
@@ -104,15 +110,6 @@ func (r *RoundRepository) ListByEvent(ctx context.Context, eventID string) ([]*r
 	return out, nil
 }
 
-func (r *RoundRepository) MaxRoundOrder(ctx context.Context, eventID string) (int, error) {
-	const q = `SELECT COALESCE(MAX(round_order), 0) FROM rounds WHERE event_id = $1`
-	var max int
-	if err := r.db.QueryRowContext(ctx, q, eventID).Scan(&max); err != nil {
-		return 0, fmt.Errorf("round_repository: max round order failed: %w", err)
-	}
-	return max, nil
-}
-
 // SetStatus is a guarded compare-and-swap: it only applies when the round
 // is currently in the from state, making forward-only transitions
 // concurrency-safe without any app-side branching.
@@ -140,7 +137,7 @@ func (r *RoundRepository) GetParticipant(ctx context.Context, roundID, userID st
 	const q = `SELECT ` + participantColumns + ` FROM round_participants WHERE round_id = $1 AND user_id = $2`
 
 	var p round.Participant
-	err := r.db.QueryRowContext(ctx, q, roundID, userID).Scan(&p.ID, &p.RoundID, &p.UserID, &p.Status, &p.DecidedAt)
+	err := r.db.QueryRowContext(ctx, q, roundID, userID).Scan(&p.ID, &p.RoundID, &p.UserID, &p.Status, &p.Rank, &p.DecidedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, round.ErrParticipantNotFound
 	}
@@ -162,7 +159,7 @@ func (r *RoundRepository) ListParticipantsByRound(ctx context.Context, roundID s
 	var out []*round.Participant
 	for rows.Next() {
 		var p round.Participant
-		if err := rows.Scan(&p.ID, &p.RoundID, &p.UserID, &p.Status, &p.DecidedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.RoundID, &p.UserID, &p.Status, &p.Rank, &p.DecidedAt); err != nil {
 			return nil, fmt.Errorf("round_repository: scan participant failed: %w", err)
 		}
 		out = append(out, &p)
@@ -175,7 +172,7 @@ func (r *RoundRepository) ListParticipantsByRound(ctx context.Context, roundID s
 
 func (r *RoundRepository) ListParticipantsWithUser(ctx context.Context, roundID string, status round.ParticipantStatus) ([]*round.ParticipantDetail, error) {
 	const q = `
-		SELECT rp.id, rp.round_id, rp.user_id, rp.status, rp.decided_at, u.full_name, u.email
+		SELECT rp.id, rp.round_id, rp.user_id, rp.status, rp.rank, rp.decided_at, u.full_name, u.email
 		FROM round_participants rp
 		JOIN users u ON u.id = rp.user_id
 		WHERE rp.round_id = $1 AND rp.status = $2`
@@ -189,7 +186,7 @@ func (r *RoundRepository) ListParticipantsWithUser(ctx context.Context, roundID 
 	var out []*round.ParticipantDetail
 	for rows.Next() {
 		var d round.ParticipantDetail
-		if err := rows.Scan(&d.ID, &d.RoundID, &d.UserID, &d.Status, &d.DecidedAt, &d.StudentName, &d.StudentEmail); err != nil {
+		if err := rows.Scan(&d.ID, &d.RoundID, &d.UserID, &d.Status, &d.Rank, &d.DecidedAt, &d.StudentName, &d.StudentEmail); err != nil {
 			return nil, fmt.Errorf("round_repository: scan participant detail failed: %w", err)
 		}
 		out = append(out, &d)
@@ -214,12 +211,15 @@ func (r *RoundRepository) UpsertParticipants(ctx context.Context, roundID string
 	defer tx.Rollback()
 
 	const q = `
-		INSERT INTO round_participants (id, round_id, user_id, status, decided_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, now())
-		ON CONFLICT (round_id, user_id) DO UPDATE SET status = EXCLUDED.status, decided_at = now()`
+		INSERT INTO round_participants (id, round_id, user_id, status, rank, decided_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, now())
+		ON CONFLICT (round_id, user_id) DO UPDATE SET status = EXCLUDED.status, rank = EXCLUDED.rank, decided_at = now()`
 
 	for _, p := range participants {
-		if _, err := tx.ExecContext(ctx, q, roundID, p.UserID, p.Status); err != nil {
+		if _, err := tx.ExecContext(ctx, q, roundID, p.UserID, p.Status, p.Rank); err != nil {
+			if isDuplicateRank(err) {
+				return round.ErrDuplicateRank
+			}
 			return fmt.Errorf("round_repository: upsert participant failed: %w", err)
 		}
 	}
@@ -235,9 +235,19 @@ func isDuplicateRoundOrder(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation && pqErr.Constraint == "uq_rounds_event_order"
 }
 
+func isDuplicateFinalRound(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation && pqErr.Constraint == "uq_rounds_one_final_per_event"
+}
+
+func isDuplicateRank(err error) bool {
+	var pqErr *pq.Error
+	return errors.As(err, &pqErr) && pqErr.Code == pgUniqueViolation && pqErr.Constraint == "uq_round_participants_rank"
+}
+
 func scanRound(s rowScanner) (*round.Round, error) {
 	var rnd round.Round
-	err := s.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.CreatedAt, &rnd.UpdatedAt)
+	err := s.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.IsFinal, &rnd.CreatedAt, &rnd.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, round.ErrNotFound
 	}
@@ -249,7 +259,7 @@ func scanRound(s rowScanner) (*round.Round, error) {
 
 func scanRoundRow(rows *sql.Rows) (*round.Round, error) {
 	var rnd round.Round
-	if err := rows.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.CreatedAt, &rnd.UpdatedAt); err != nil {
+	if err := rows.Scan(&rnd.ID, &rnd.EventID, &rnd.RoundOrder, &rnd.RoundName, &rnd.StartAt, &rnd.DurationMinutes, &rnd.Status, &rnd.IsFinal, &rnd.CreatedAt, &rnd.UpdatedAt); err != nil {
 		return nil, fmt.Errorf("round_repository: scan row failed: %w", err)
 	}
 	return &rnd, nil
