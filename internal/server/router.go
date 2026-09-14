@@ -183,7 +183,6 @@ func NewRouter(
 
 		r.Get("/users", adminHandler.ListUsers)
 		r.Put("/users/{id}/verify", adminHandler.VerifyUser)
-		r.Post("/users/{id}/admit-card", adminHandler.UploadAdmitCard)
 
 		// Exam-registration payment review queue, mirroring the KYC queue
 		// above: list by ?status=pending, then approve/reject each.

@@ -43,5 +43,4 @@ type UserResponse struct {
 	ProfilePicture     *string `json:"profile_picture,omitempty"`
 	VerificationDoc    *string `json:"verification_doc,omitempty"`
 	VerificationStatus string  `json:"verification_status"`
-	AdmitCardURL       *string `json:"admit_card_url,omitempty"`
 }
