@@ -102,7 +102,6 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
 | `GET /api/admin/notices` (all notices, active or not), `POST /api/admin/notices`, `PUT /api/admin/notices/{id}` (`text_en`, `text_bn`, `display_order`, `is_active`), `DELETE /api/admin/notices/{id}` | access token + admin |
 | `GET /api/admin/important-dates` (all rows), `POST /api/admin/important-dates`, `PUT /api/admin/important-dates/{id}` (`event_date` `YYYY-MM-DD`, `title`, `details_en`, `details_bn`, `display_order`, `is_active`), `DELETE /api/admin/important-dates/{id}` | access token + admin |
 | `GET /api/admin/users?status=` , `PUT /api/admin/users/{id}/verify` | access token + admin |
-| `POST /api/admin/users/{id}/admit-card` (multipart `file`, PDF or image) | access token + admin |
 | `GET /api/admin/registrations?status=&event_id=` , `PUT /api/admin/registrations/{id}/review` (`{"status":"approved"\|"rejected"}`), `PUT /api/admin/registrations/{id}/unreject` (no body) | access token + admin |
 | `POST /api/admin/registrations/{id}/admit-card` (multipart `file`, PDF only; 409 unless the registration is `approved`) | access token + admin |
 | `GET /uploads/*` (event images) | none |
@@ -275,12 +274,7 @@ routes additionally require a trusted `Origin` (`RequireTrustedOrigin`).
   using `RequireAccessToken` — a browser can't put `X-Device-Fingerprint` on an
   `<img>`/download request, so the single-device gate would 401 every document view.
   It answers 401 only for a missing/invalid token and 403 for a valid token that is
-  neither the owner nor an admin. `users.admit_card_url` is a separate, general
-  per-student admit card an admin sets via `POST /api/admin/users/{id}/admit-card`
-  (multipart `file`, PDF or image, validated with `storage.ValidateDocument` — same
-  as `upload-file`); it is stored and gated through this same `uploads/users/<id>/`
-  path and exposed on `GET /api/auth/me`. It is independent of the per-registration
-  admit card described under "Admit cards" below.
+  neither the owner nor an admin.
 - **Profile completeness.** `middleware.RequireCompleteProfile` gates future
   non-auth routes on verified email, `verification_status = verified`, and full
   name/institution/level/medium. Deliberately not applied to `/api/auth/*` or
